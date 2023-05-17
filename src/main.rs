@@ -1,7 +1,5 @@
 #![feature(int_roundings)]
 
-use std::panic::Location;
-
 use byteorder::{ReadBytesExt, LE};
 use eframe::egui::{Context, Ui, WidgetText};
 use egui_dock::{DockArea, Node, Tree};
@@ -13,20 +11,15 @@ use object::{
     LittleEndian, ReadRef,
 };
 
-use crate::{
+use crate::view::{
     assembly::AssemblyView,
     location::{Location, LocationType, LocationView},
     raw::RawView,
-    view::{
-        assembly::AssemblyView,
-        location::{LocationType, LocationView},
-        raw::RawView,
-        AppView,
-    },
+    AppView,
 };
 
-mod cfo;
 mod view;
+mod warden;
 
 pub fn main() -> eframe::Result<()> {
     eframe::run_native(
@@ -223,7 +216,7 @@ impl egui_dock::TabViewer for TabViewer<'_> {
     }
 }
 
-struct AppState {
+pub struct AppState {
     data: Vec<u8>,
     // action
     go_to_address: Option<u64>,

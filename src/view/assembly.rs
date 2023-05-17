@@ -4,7 +4,7 @@ use eframe::egui::{Align, Color32, Label, Layout, RichText, Sense, TextStyle, Ui
 use egui_extras::{Column, TableBuilder};
 use iced_x86::{Decoder, DecoderOptions, Formatter, FormatterTextKind, NasmFormatter};
 
-use crate::{AppState, AppView};
+use crate::{warden, AppState, AppView};
 
 pub struct AssemblyView {
     bitness: u32,
@@ -44,7 +44,8 @@ impl AppView for AssemblyView {
         let mut table_builder = TableBuilder::new(ui)
             .min_scrolled_height(0.0)
             .max_scroll_height(f32::INFINITY)
-            .columns(Column::auto(), 2)
+            .column(Column::auto())
+            .column(Column::auto().resizable(true))
             .column(Column::remainder());
         table_builder = if let Some(row) = self.go_to_row {
             self.go_to_row = None;
@@ -70,18 +71,17 @@ impl AppView for AssemblyView {
                         let mut decoder =
                             Decoder::with_ip(self.bitness, data, address, DecoderOptions::NONE);
                         decoder.set_position(position).unwrap();
-                        // decode and format instruction
-                        let instruction = decoder.decode();
+                        let instruction = warden::CfoPatcher::new(&mut decoder).next().unwrap();
                         let mut cached_instruction = CachedInstruction::new(
                             instruction.ip(),
-                            data[position..decoder.position()]
+                            data[position..position + instruction.len()]
                                 .iter()
                                 .map(|&elem| format!("{:02X}", elem))
                                 .collect::<Vec<_>>()
                                 .join(" "),
                         );
                         NasmFormatter::new().format(&instruction, &mut cached_instruction);
-                        self.last_address += instruction.len() as u64;
+                        self.last_address += (decoder.position() - position) as u64;
                         self.addresses.insert(cached_instruction.address);
                         self.instructions.push(cached_instruction);
                         // validate address
