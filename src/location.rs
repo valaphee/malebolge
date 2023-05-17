@@ -25,7 +25,7 @@ impl AppView for LocationView {
             .striped(true)
             .min_scrolled_height(0.0)
             .max_scroll_height(f32::INFINITY)
-            .columns(Column::auto().resizable(true), 2)
+            .columns(Column::auto(), 2)
             .column(Column::remainder())
             .header(row_height, |mut row| {
                 row.col(|ui| {
@@ -39,8 +39,10 @@ impl AppView for LocationView {
                 });
             })
             .body(|body| {
+                // render rows
                 body.rows(row_height, self.locations.len(), |index, mut row| {
                     let location = &self.locations[index];
+                    // render cols
                     row.col(|ui| {
                         if ui
                             .add(

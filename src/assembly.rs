@@ -38,24 +38,25 @@ impl AppView for AssemblyView {
         TableBuilder::new(ui)
             .min_scrolled_height(0.0)
             .max_scroll_height(f32::INFINITY)
-            .column(Column::auto().resizable(true))
+            .columns(Column::auto(), 2)
             .column(Column::remainder())
             .body(|body| {
+                // lazy decoder and formatter
+                let data = &state.data[self.data_offset..self.data_offset + self.data_length];
                 let address = self.last_address;
                 let position = (address - self.address) as usize;
                 let mut decoder_and_formatter =
                     Lazy::<(iced_x86::Instruction, Decoder, NasmFormatter), _>::new(|| {
                         let raw_instruction = iced_x86::Instruction::default();
-                        let mut decoder = Decoder::with_ip(
-                            self.bitness,
-                            &state.data[self.data_offset..self.data_offset + self.data_length],
-                            address,
-                            DecoderOptions::NONE,
-                        );
+                        let mut decoder =
+                            Decoder::with_ip(self.bitness, data, address, DecoderOptions::NONE);
                         decoder.set_position(position).unwrap();
                         (raw_instruction, decoder, NasmFormatter::new())
                     });
+                // render rows
                 body.rows(row_height, self.instructions.len() + 1, |index, mut row| {
+                    // cache decoded instructions, rows will always be loaded in order, therefore
+                    // its save to use a Vec
                     let instruction = if let Some(instruction) = self.instructions.get(index) {
                         instruction
                     } else {
@@ -63,17 +64,30 @@ impl AppView for AssemblyView {
                             *decoder_and_formatter;
                         decoder.decode_out(raw_instruction);
                         self.last_address += raw_instruction.len() as u64;
-                        let mut instruction = Instruction::new(raw_instruction.ip());
+                        let mut instruction = Instruction::new(
+                            raw_instruction.ip(),
+                            data[decoder.position() - raw_instruction.len()..decoder.position()]
+                                .iter()
+                                .map(|&elem| format!("{:02X}", elem))
+                                .collect::<Vec<_>>()
+                                .join(" "),
+                        );
                         formatter.format(raw_instruction, &mut instruction);
                         self.instructions.push(instruction);
                         &self.instructions[index]
                     };
+                    // render cols
                     row.col(|ui| {
                         ui.add(
                             Label::new(
                                 RichText::from(format!("{:016X}", instruction.address)).monospace(),
                             )
                             .wrap(false),
+                        );
+                    });
+                    row.col(|ui| {
+                        ui.add(
+                            Label::new(RichText::from(&instruction.data).monospace()).wrap(false),
                         );
                     });
                     row.col(|ui| {
@@ -104,13 +118,15 @@ impl AppView for AssemblyView {
 
 struct Instruction {
     address: u64,
+    data: String,
     text: Vec<(RichText, Option<u64>)>,
 }
 
 impl Instruction {
-    fn new(address: u64) -> Self {
+    fn new(address: u64, data: String) -> Self {
         Self {
             address,
+            data,
             text: Default::default(),
         }
     }

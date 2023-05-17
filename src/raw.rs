@@ -43,6 +43,7 @@ impl AppView for RawView {
             .body(|body| {
                 let aligned_address = self.address as usize / 16;
                 let aligned_address_offset = self.address as usize % 16;
+                // render rows
                 body.rows(
                     row_height,
                     (data.len() + aligned_address_offset).div_ceil(16),
@@ -53,6 +54,7 @@ impl AppView for RawView {
                             index * 16 - aligned_address_offset
                         }
                             ..(index * 16 + 16 - aligned_address_offset).min(data.len())];
+                        // render cols
                         row.col(|ui| {
                             ui.add(
                                 Label::new(
