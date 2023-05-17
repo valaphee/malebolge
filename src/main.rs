@@ -25,7 +25,7 @@ pub fn main() -> eframe::Result<()> {
     eframe::run_native(
         "Amalgam",
         eframe::NativeOptions::default(),
-        Box::new(|_cc| Box::new(App::new())),
+        Box::new(|_| Box::new(App::new())),
     )
 }
 
@@ -103,9 +103,9 @@ impl App {
         if let Some(export_table) = data_directories.export_table(data, &sections).unwrap() {
             for export in export_table.exports().unwrap() {
                 match export.target {
-                    ExportTarget::Address(rva) => {
+                    ExportTarget::Address(relative_address) => {
                         entries.push(Location::new(
-                            rva as u64 + optional_header.image_base(),
+                            relative_address as u64 + optional_header.image_base(),
                             LocationType::Export,
                             String::from_utf8_lossy(export.name.unwrap()).to_string(),
                         ));
@@ -187,9 +187,9 @@ impl App {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
-        if let Some(go_to_address) = &self.state.go_to_address {
-            self.open_address_view(*go_to_address);
+        if let Some(go_to_address) = self.state.go_to_address {
             self.state.go_to_address = None;
+            self.open_address_view(go_to_address);
         }
         DockArea::new(&mut self.tree).show(
             ctx,

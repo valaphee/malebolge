@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+
 use eframe::egui::{Align, Color32, Label, Layout, RichText, Sense, TextStyle, Ui, Vec2};
 use egui_extras::{Column, TableBuilder};
 use iced_x86::{Decoder, DecoderOptions, Formatter, FormatterTextKind, NasmFormatter};
@@ -14,6 +15,8 @@ pub struct AssemblyView {
     last_address: u64,
     addresses: HashSet<u64>,
     instructions: Vec<CachedInstruction>,
+    // action
+    go_to_row: Option<usize>,
 }
 
 impl AssemblyView {
@@ -26,6 +29,7 @@ impl AssemblyView {
             last_address: address,
             addresses: Default::default(),
             instructions: Default::default(),
+            go_to_row: None,
         }
     }
 }
@@ -37,23 +41,34 @@ impl AppView for AssemblyView {
 
     fn ui(&mut self, state: &mut AppState, ui: &mut Ui) {
         let row_height = ui.text_style_height(&TextStyle::Monospace);
-        TableBuilder::new(ui)
+        let mut table_builder = TableBuilder::new(ui)
             .min_scrolled_height(0.0)
             .max_scroll_height(f32::INFINITY)
             .columns(Column::auto(), 2)
-            .column(Column::remainder())
-            .body(|body| {
-                // render rows
-                body.rows(row_height, self.instructions.len() + 1, |index, mut row| {
+            .column(Column::remainder());
+        table_builder = if let Some(row) = self.go_to_row {
+            self.go_to_row = None;
+            table_builder.scroll_to_row(row, Some(Align::TOP))
+        } else {
+            table_builder
+        };
+        table_builder.body(|body| {
+            // render rows
+            body.rows(
+                row_height,
+                self.instructions.len() + 100,
+                |index, mut row| {
                     // cache decoded instructions, rows will always be loaded in order, therefore
                     // its save to use a Vec
                     let instruction = if let Some(instruction) = self.instructions.get(index) {
                         instruction
                     } else {
-                        let data = &state.data[self.data_offset..self.data_offset + self.data_length];
+                        let data =
+                            &state.data[self.data_offset..self.data_offset + self.data_length];
                         let address = self.last_address;
                         let position = (address - self.address) as usize;
-                        let mut decoder = Decoder::with_ip(self.bitness, data, address, DecoderOptions::NONE);
+                        let mut decoder =
+                            Decoder::with_ip(self.bitness, data, address, DecoderOptions::NONE);
                         decoder.set_position(position).unwrap();
                         // decode and format instruction
                         let instruction = decoder.decode();
@@ -70,13 +85,15 @@ impl AppView for AssemblyView {
                         self.addresses.insert(cached_instruction.address);
                         self.instructions.push(cached_instruction);
                         // validate address
-                        for cached_instruction in &mut self.instructions {
-                            for (text, go_to_address) in &mut cached_instruction.text {
-                                let Some(go_to_address) = go_to_address.to_owned() else {
+                        for instruction in &mut self.instructions {
+                            for (text, address) in &mut instruction.text {
+                                let Some(address) = address else {
                                     continue;
                                 };
-                                if (self.address..self.last_address).contains(&go_to_address) && !self.addresses.contains(&go_to_address) {
-                                    *text = text.clone().background_color(Color32::DARK_RED);
+                                if (self.address..self.last_address).contains(address) {
+                                    if !self.addresses.contains(address) {
+                                        *text = text.clone().background_color(Color32::DARK_RED);
+                                    }
                                 }
                             }
                         }
@@ -99,8 +116,8 @@ impl AppView for AssemblyView {
                     row.col(|ui| {
                         ui.with_layout(Layout::left_to_right(Align::Min), |ui| {
                             ui.spacing_mut().item_spacing = Vec2::ZERO;
-                            for (text, go_to_address) in &instruction.text {
-                                if let Some(go_to_address) = go_to_address {
+                            for (text, address_with_align_bit) in &instruction.text {
+                                if let Some(address) = *address_with_align_bit {
                                     if ui
                                         .add(
                                             Label::new(text.clone())
@@ -109,7 +126,21 @@ impl AppView for AssemblyView {
                                         )
                                         .clicked()
                                     {
-                                        state.go_to_address = Some(*go_to_address);
+                                        if let Some(row) =
+                                            self.instructions.iter().enumerate().find_map(
+                                                |(row, instruction)| {
+                                                    if instruction.address == address {
+                                                        Some(row)
+                                                    } else {
+                                                        None
+                                                    }
+                                                },
+                                            )
+                                        {
+                                            self.go_to_row = Some(row);
+                                        } else {
+                                            state.go_to_address = Some(address);
+                                        }
                                     }
                                 } else {
                                     ui.add(Label::new(text.clone()).wrap(false));
@@ -117,8 +148,9 @@ impl AppView for AssemblyView {
                             }
                         });
                     });
-                });
-            });
+                },
+            );
+        });
     }
 }
 
