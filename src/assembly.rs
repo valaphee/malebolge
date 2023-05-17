@@ -1,7 +1,7 @@
+use std::collections::HashSet;
 use eframe::egui::{Align, Color32, Label, Layout, RichText, Sense, TextStyle, Ui, Vec2};
 use egui_extras::{Column, TableBuilder};
 use iced_x86::{Decoder, DecoderOptions, Formatter, FormatterTextKind, NasmFormatter};
-use once_cell::sync::Lazy;
 
 use crate::{AppState, AppView};
 
@@ -12,7 +12,8 @@ pub struct AssemblyView {
     data_length: usize,
     // cache
     last_address: u64,
-    instructions: Vec<Instruction>,
+    addresses: HashSet<u64>,
+    instructions: Vec<CachedInstruction>,
 }
 
 impl AssemblyView {
@@ -23,6 +24,7 @@ impl AssemblyView {
             data_offset,
             data_length,
             last_address: address,
+            addresses: Default::default(),
             instructions: Default::default(),
         }
     }
@@ -41,18 +43,6 @@ impl AppView for AssemblyView {
             .columns(Column::auto(), 2)
             .column(Column::remainder())
             .body(|body| {
-                // lazy decoder and formatter
-                let data = &state.data[self.data_offset..self.data_offset + self.data_length];
-                let address = self.last_address;
-                let position = (address - self.address) as usize;
-                let mut decoder_and_formatter =
-                    Lazy::<(iced_x86::Instruction, Decoder, NasmFormatter), _>::new(|| {
-                        let raw_instruction = iced_x86::Instruction::default();
-                        let mut decoder =
-                            Decoder::with_ip(self.bitness, data, address, DecoderOptions::NONE);
-                        decoder.set_position(position).unwrap();
-                        (raw_instruction, decoder, NasmFormatter::new())
-                    });
                 // render rows
                 body.rows(row_height, self.instructions.len() + 1, |index, mut row| {
                     // cache decoded instructions, rows will always be loaded in order, therefore
@@ -60,20 +50,36 @@ impl AppView for AssemblyView {
                     let instruction = if let Some(instruction) = self.instructions.get(index) {
                         instruction
                     } else {
-                        let (ref mut raw_instruction, ref mut decoder, ref mut formatter) =
-                            *decoder_and_formatter;
-                        decoder.decode_out(raw_instruction);
-                        self.last_address += raw_instruction.len() as u64;
-                        let mut instruction = Instruction::new(
-                            raw_instruction.ip(),
-                            data[decoder.position() - raw_instruction.len()..decoder.position()]
+                        let data = &state.data[self.data_offset..self.data_offset + self.data_length];
+                        let address = self.last_address;
+                        let position = (address - self.address) as usize;
+                        let mut decoder = Decoder::with_ip(self.bitness, data, address, DecoderOptions::NONE);
+                        decoder.set_position(position).unwrap();
+                        // decode and format instruction
+                        let instruction = decoder.decode();
+                        let mut cached_instruction = CachedInstruction::new(
+                            instruction.ip(),
+                            data[position..decoder.position()]
                                 .iter()
                                 .map(|&elem| format!("{:02X}", elem))
                                 .collect::<Vec<_>>()
                                 .join(" "),
                         );
-                        formatter.format(raw_instruction, &mut instruction);
-                        self.instructions.push(instruction);
+                        NasmFormatter::new().format(&instruction, &mut cached_instruction);
+                        self.last_address += instruction.len() as u64;
+                        self.addresses.insert(cached_instruction.address);
+                        self.instructions.push(cached_instruction);
+                        // validate address
+                        for cached_instruction in &mut self.instructions {
+                            for (text, go_to_address) in &mut cached_instruction.text {
+                                let Some(go_to_address) = go_to_address.to_owned() else {
+                                    continue;
+                                };
+                                if (self.address..self.last_address).contains(&go_to_address) && !self.addresses.contains(&go_to_address) {
+                                    *text = text.clone().background_color(Color32::DARK_RED);
+                                }
+                            }
+                        }
                         &self.instructions[index]
                     };
                     // render cols
@@ -93,8 +99,8 @@ impl AppView for AssemblyView {
                     row.col(|ui| {
                         ui.with_layout(Layout::left_to_right(Align::Min), |ui| {
                             ui.spacing_mut().item_spacing = Vec2::ZERO;
-                            for (text, address) in &instruction.text {
-                                if let Some(address) = address {
+                            for (text, go_to_address) in &instruction.text {
+                                if let Some(go_to_address) = go_to_address {
                                     if ui
                                         .add(
                                             Label::new(text.clone())
@@ -103,7 +109,7 @@ impl AppView for AssemblyView {
                                         )
                                         .clicked()
                                     {
-                                        state.go_to_address = Some(*address);
+                                        state.go_to_address = Some(*go_to_address);
                                     }
                                 } else {
                                     ui.add(Label::new(text.clone()).wrap(false));
@@ -116,13 +122,13 @@ impl AppView for AssemblyView {
     }
 }
 
-struct Instruction {
+struct CachedInstruction {
     address: u64,
     data: String,
     text: Vec<(RichText, Option<u64>)>,
 }
 
-impl Instruction {
+impl CachedInstruction {
     fn new(address: u64, data: String) -> Self {
         Self {
             address,
@@ -132,7 +138,7 @@ impl Instruction {
     }
 }
 
-impl iced_x86::FormatterOutput for Instruction {
+impl iced_x86::FormatterOutput for CachedInstruction {
     fn write(&mut self, text: &str, kind: FormatterTextKind) {
         self.text.push(match kind {
             FormatterTextKind::LabelAddress | FormatterTextKind::FunctionAddress => (
