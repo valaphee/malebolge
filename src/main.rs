@@ -1,5 +1,7 @@
 #![feature(int_roundings)]
 
+use std::panic::Location;
+
 use byteorder::{ReadBytesExt, LE};
 use eframe::egui::{Context, Ui, WidgetText};
 use egui_dock::{DockArea, Node, Tree};
@@ -15,11 +17,16 @@ use crate::{
     assembly::AssemblyView,
     location::{Location, LocationType, LocationView},
     raw::RawView,
+    view::{
+        assembly::AssemblyView,
+        location::{LocationType, LocationView},
+        raw::RawView,
+        AppView,
+    },
 };
 
-mod assembly;
-mod location;
-mod raw;
+mod cfo;
+mod view;
 
 pub fn main() -> eframe::Result<()> {
     eframe::run_native(
@@ -214,12 +221,6 @@ impl egui_dock::TabViewer for TabViewer<'_> {
     fn title(&mut self, tab: &mut Self::Tab) -> WidgetText {
         tab.title().into()
     }
-}
-
-trait AppView {
-    fn title(&self) -> String;
-
-    fn ui(&mut self, state: &mut AppState, ui: &mut Ui);
 }
 
 struct AppState {
