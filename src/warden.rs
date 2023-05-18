@@ -15,7 +15,7 @@ impl Iterator for CfoPatcher<'_, '_> {
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.decoder.can_decode() {
-            let mut instruction = self.decoder.decode();
+            let instruction = self.decoder.decode();
             match instruction.flow_control() {
                 FlowControl::ConditionalBranch | FlowControl::UnconditionalBranch => {
                     if instruction.op0_kind() == OpKind::NearBranch64 && instruction.len() == 2 {

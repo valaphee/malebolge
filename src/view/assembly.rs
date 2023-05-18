@@ -11,7 +11,7 @@ pub struct AssemblyView {
     address: u64,
     data_offset: usize,
     data_length: usize,
-    // cache
+    // state
     last_address: u64,
     addresses: HashSet<u64>,
     instructions: Vec<CachedInstruction>,
@@ -40,6 +40,7 @@ impl AppView for AssemblyView {
     }
 
     fn ui(&mut self, state: &mut AppState, ui: &mut Ui) {
+        // render table
         let row_height = ui.text_style_height(&TextStyle::Monospace);
         let mut table_builder = TableBuilder::new(ui)
             .min_scrolled_height(0.0)
@@ -64,6 +65,7 @@ impl AppView for AssemblyView {
                     let instruction = if let Some(instruction) = self.instructions.get(index) {
                         instruction
                     } else {
+                        // decode and format instruction
                         let data =
                             &state.data[self.data_offset..self.data_offset + self.data_length];
                         let address = self.last_address;
@@ -84,7 +86,7 @@ impl AppView for AssemblyView {
                         self.last_address += (decoder.position() - position) as u64;
                         self.addresses.insert(cached_instruction.address);
                         self.instructions.push(cached_instruction);
-                        // validate address
+                        // validate addresses
                         for instruction in &mut self.instructions {
                             for (text, address) in &mut instruction.text {
                                 let Some(address) = address else {

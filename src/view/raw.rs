@@ -27,6 +27,7 @@ impl AppView for RawView {
     fn ui(&mut self, state: &mut AppState, ui: &mut Ui) {
         let data =
             &state.data[self.data_offset as usize..(self.data_offset + self.data_length) as usize];
+        // render table
         let row_height = ui.text_style_height(&TextStyle::Monospace);
         TableBuilder::new(ui)
             .min_scrolled_height(0.0)

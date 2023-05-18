@@ -1,7 +1,8 @@
 #![feature(int_roundings)]
+#![windows_subsystem = "windows"]
 
 use byteorder::{ReadBytesExt, LE};
-use eframe::egui::{Context, Ui, WidgetText};
+use eframe::egui::{Context, Key, Ui, WidgetText};
 use egui_dock::{DockArea, Node, Tree};
 use object::{
     coff::CoffHeader,
@@ -24,7 +25,10 @@ mod warden;
 pub fn main() -> eframe::Result<()> {
     eframe::run_native(
         "Amalgam",
-        eframe::NativeOptions::default(),
+        eframe::NativeOptions {
+            icon_data: None,
+            ..Default::default()
+        },
         Box::new(|_| Box::new(App::new())),
     )
 }
@@ -187,10 +191,16 @@ impl App {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
+        // "go to address" action
         if let Some(go_to_address) = self.state.go_to_address {
             self.state.go_to_address = None;
             self.open_address_view(go_to_address);
         }
+        // toggle fullscreen
+        if ctx.input(|input_state| input_state.key_pressed(Key::F11)) {
+            _frame.set_fullscreen(!_frame.info().window_info.fullscreen)
+        }
+        // render dock area
         DockArea::new(&mut self.tree).show(
             ctx,
             &mut TabViewer {
