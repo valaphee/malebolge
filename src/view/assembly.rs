@@ -4,7 +4,7 @@ use eframe::egui::{Align, Color32, Label, Layout, RichText, Sense, TextStyle, Ui
 use egui_extras::{Column, TableBuilder};
 use iced_x86::{Decoder, DecoderOptions, Formatter, FormatterTextKind, NasmFormatter};
 
-use crate::{warden, AppView, Global};
+use crate::{warden, AppView, Project};
 
 pub struct AssemblyView {
     bitness: u32,
@@ -39,7 +39,7 @@ impl AppView for AssemblyView {
         format!("Assembly ({:016X})", self.address).into()
     }
 
-    fn ui(&mut self, state: &mut Global, ui: &mut Ui) {
+    fn ui(&mut self, project: &mut Project, ui: &mut Ui) {
         // render table
         let row_height = ui.text_style_height(&TextStyle::Monospace);
         let mut table_builder = TableBuilder::new(ui)
@@ -67,7 +67,7 @@ impl AppView for AssemblyView {
                     } else {
                         // decode and format instruction
                         let data =
-                            &state.data[self.data_offset..self.data_offset + self.data_length];
+                            &project.data[self.data_offset..self.data_offset + self.data_length];
                         let address = self.last_address;
                         let position = (address - self.address) as usize;
                         let mut decoder =
@@ -141,7 +141,7 @@ impl AppView for AssemblyView {
                                         {
                                             self.go_to_row = Some(row);
                                         } else {
-                                            state.go_to_address = Some(address);
+                                            project.go_to_address = Some(address);
                                         }
                                     }
                                 } else {

@@ -5,21 +5,12 @@ use eframe::{
 use egui_dock::egui::{Align, Sense};
 use egui_extras::{Column, TableBuilder};
 
-use crate::{AppView, Global};
+use crate::{AppView, Project};
 
+#[derive(Default)]
 pub struct LabelView {
-    labels: Vec<Label>,
     // runtime
-    add_label_window: Option<AddLabelWindow>,
-}
-
-impl LabelView {
-    pub fn new(labels: Vec<Label>) -> Self {
-        Self {
-            labels,
-            add_label_window: Default::default(),
-        }
-    }
+    new_label_window: Option<NewLabelWindow>,
 }
 
 impl AppView for LabelView {
@@ -27,7 +18,7 @@ impl AppView for LabelView {
         "Labels".into()
     }
 
-    fn ui(&mut self, state: &mut Global, ui: &mut Ui) {
+    fn ui(&mut self, project: &mut Project, ui: &mut Ui) {
         // render table
         let row_height = ui.text_style_height(&TextStyle::Monospace);
         TableBuilder::new(ui)
@@ -50,28 +41,27 @@ impl AppView for LabelView {
             })
             .body(|body| {
                 // render rows
-                body.rows(row_height, self.labels.len(), |index, mut row| {
-                    let location = &self.labels[index];
+                body.rows(row_height, project.labels.len(), |index, mut row| {
+                    let label = &project.labels[index];
                     // render cols
                     row.col(|ui| {
                         if ui
                             .add(
                                 egui::Label::new(
-                                    RichText::from(format!("{:016X}", location.address))
-                                        .monospace(),
+                                    RichText::from(format!("{:016X}", label.address)).monospace(),
                                 )
                                 .wrap(false)
                                 .sense(Sense::click()),
                             )
                             .clicked()
                         {
-                            state.go_to_address = Some(location.address)
+                            project.go_to_address = Some(label.address)
                         }
                     });
                     row.col(|ui| {
                         ui.add(
                             egui::Label::new(
-                                RichText::from(match location.type_ {
+                                RichText::from(match label.type_ {
                                     LabelType::EntryPoint => "Entry point",
                                     LabelType::Export => "Export",
                                     LabelType::TlsCallback => "TLS callback",
@@ -84,19 +74,18 @@ impl AppView for LabelView {
                     });
                     row.col(|ui| {
                         ui.add(
-                            egui::Label::new(RichText::from(&location.name).monospace())
-                                .wrap(false),
+                            egui::Label::new(RichText::from(&label.name).monospace()).wrap(false),
                         );
                     });
                 });
             });
         // render "add label" window
-        if let Some(add_label_window) = &mut self.add_label_window {
+        if let Some(add_label_window) = &mut self.new_label_window {
             if let Some(label) = add_label_window.ui(ui) {
-                self.add_label_window = None;
-                self.labels.push(label);
+                self.new_label_window = None;
+                project.labels.push(label);
             } else if !add_label_window.open {
-                self.add_label_window = None;
+                self.new_label_window = None;
             }
         }
         // render context menu
@@ -106,9 +95,9 @@ impl AppView for LabelView {
             Sense::click(),
         )
         .context_menu(|ui| {
-            // open "add label" window
-            if ui.button("Add Label").clicked() && self.add_label_window.is_none() {
-                self.add_label_window = Some(Default::default());
+            // open "new label" window
+            if ui.button("New Label").clicked() && self.new_label_window.is_none() {
+                self.new_label_window = Some(Default::default());
                 ui.close_menu();
             }
         });
@@ -140,16 +129,16 @@ pub enum LabelType {
     Custom,
 }
 
-struct AddLabelWindow {
+struct NewLabelWindow {
     open: bool,
     name: String,
     address: String,
 }
 
-impl AddLabelWindow {
+impl NewLabelWindow {
     fn ui(&mut self, ui: &mut Ui) -> Option<Label> {
         let mut label = None;
-        Window::new("Add Label")
+        Window::new("New Label")
             .open(&mut self.open)
             .resizable(false)
             .collapsible(false)
@@ -180,7 +169,7 @@ impl AddLabelWindow {
     }
 }
 
-impl Default for AddLabelWindow {
+impl Default for NewLabelWindow {
     fn default() -> Self {
         Self {
             open: true,

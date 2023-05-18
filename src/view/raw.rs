@@ -1,7 +1,7 @@
 use eframe::egui::{Label, RichText, TextStyle, Ui};
 use egui_extras::{Column, TableBuilder};
 
-use crate::{AppView, Global};
+use crate::{AppView, Project};
 
 pub struct RawView {
     address: u64,
@@ -24,9 +24,9 @@ impl AppView for RawView {
         format!("Raw ({:016X})", self.address)
     }
 
-    fn ui(&mut self, state: &mut Global, ui: &mut Ui) {
-        let data =
-            &state.data[self.data_offset as usize..(self.data_offset + self.data_length) as usize];
+    fn ui(&mut self, project: &mut Project, ui: &mut Ui) {
+        let data = &project.data
+            [self.data_offset as usize..(self.data_offset + self.data_length) as usize];
         // render table
         let row_height = ui.text_style_height(&TextStyle::Monospace);
         TableBuilder::new(ui)
