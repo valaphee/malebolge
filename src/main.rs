@@ -2,7 +2,10 @@
 #![windows_subsystem = "windows"]
 
 use byteorder::{ReadBytesExt, LE};
-use eframe::egui::{Context, Key, Ui, WidgetText};
+use eframe::{
+    egui::{CentralPanel, Context, Frame, Grid, Key, Layout, Ui, WidgetText, Window},
+    emath::Align,
+};
 use egui_dock::{DockArea, Node, Tree};
 use object::{
     coff::CoffHeader,
@@ -14,7 +17,7 @@ use object::{
 
 use crate::view::{
     assembly::AssemblyView,
-    location::{Location, LocationType, LocationView},
+    label::{Label, LabelType, LabelView},
     raw::RawView,
     AppView,
 };
@@ -33,9 +36,12 @@ pub fn main() -> eframe::Result<()> {
     )
 }
 
+#[derive(Default)]
 struct App {
-    state: AppState,
+    global: Global,
     tree: Tree<Box<dyn AppView>>,
+    // runtime
+    go_to_address_window: Option<GoToAddressWindow>,
 }
 
 impl App {
@@ -48,11 +54,11 @@ impl App {
         };
 
         let mut self_ = Self {
-            state: AppState {
+            global: Global {
                 data,
-                go_to_address: None,
+                ..Default::default()
             },
-            tree: Default::default(),
+            ..Default::default()
         };
         self_.open_location_view();
         self_
@@ -88,7 +94,7 @@ impl App {
     }
 
     fn open_location_view(&mut self) {
-        let data = self.state.data.as_slice();
+        let data = self.global.data.as_slice();
         let dos_header = ImageDosHeader::parse(data).unwrap();
         let mut nt_header_offset = dos_header.nt_headers_offset().into();
         let (nt_headers, data_directories) =
@@ -98,9 +104,9 @@ impl App {
         let sections = file_header.sections(data, nt_header_offset).unwrap();
         let mut entries = vec![];
         if optional_header.address_of_entry_point() != 0 {
-            entries.push(Location::new(
+            entries.push(Label::new(
                 optional_header.address_of_entry_point() as u64 + optional_header.image_base(),
-                LocationType::EntryPoint,
+                LabelType::EntryPoint,
                 "".to_string(),
             ));
         }
@@ -108,9 +114,9 @@ impl App {
             for export in export_table.exports().unwrap() {
                 match export.target {
                     ExportTarget::Address(relative_address) => {
-                        entries.push(Location::new(
+                        entries.push(Label::new(
                             relative_address as u64 + optional_header.image_base(),
-                            LocationType::Export,
+                            LabelType::Export,
                             String::from_utf8_lossy(export.name.unwrap()).to_string(),
                         ));
                     }
@@ -131,9 +137,9 @@ impl App {
                             if callback == 0 {
                                 break;
                             }
-                            entries.push(Location::new(
+                            entries.push(Label::new(
                                 callback,
-                                LocationType::TlsCallback,
+                                LabelType::TlsCallback,
                                 "".to_string(),
                             ));
                         }
@@ -141,11 +147,11 @@ impl App {
                 }
             }
         }
-        self.open_view(Box::new(LocationView::new(entries)));
+        self.open_view(Box::new(LabelView::new(entries)));
     }
 
     fn open_address_view(&mut self, address: u64) {
-        let data = self.state.data.as_slice();
+        let data = self.global.data.as_slice();
         let dos_header = ImageDosHeader::parse(data).unwrap();
         let mut nt_header_offset = dos_header.nt_headers_offset().into();
         let (nt_headers, _data_directories) =
@@ -190,35 +196,54 @@ impl App {
 }
 
 impl eframe::App for App {
-    fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
-        // "go to address" action
-        if let Some(go_to_address) = self.state.go_to_address {
-            self.state.go_to_address = None;
-            self.open_address_view(go_to_address);
-        }
-        // toggle fullscreen
+    fn update(&mut self, ctx: &Context, frame: &mut eframe::Frame) {
+        // toggle fullscreen (F11)
         if ctx.input(|input_state| input_state.key_pressed(Key::F11)) {
-            _frame.set_fullscreen(!_frame.info().window_info.fullscreen)
+            frame.set_fullscreen(!frame.info().window_info.fullscreen)
         }
-        // render dock area
-        DockArea::new(&mut self.tree).show(
-            ctx,
-            &mut TabViewer {
-                state: &mut self.state,
-            },
-        );
+        // open "go to address" window
+        if ctx.input(|input_state| input_state.key_pressed(Key::G))
+            && self.go_to_address_window.is_none()
+        {
+            self.go_to_address_window = Some(Default::default())
+        }
+        CentralPanel::default()
+            .frame(Frame::none())
+            .show(ctx, |ui| {
+                // render dock area
+                DockArea::new(&mut self.tree).show_inside(
+                    ui,
+                    &mut TabViewer {
+                        global: &mut self.global,
+                    },
+                );
+                // render "go to address" window
+                if let Some(go_to_address_window) = &mut self.go_to_address_window {
+                    if let Some(address) = go_to_address_window.ui(ui) {
+                        self.go_to_address_window = None;
+                        self.global.go_to_address = Some(address);
+                    } else if !go_to_address_window.open {
+                        self.go_to_address_window = None;
+                    }
+                }
+            });
+        // go to address
+        if let Some(address) = self.global.go_to_address {
+            self.global.go_to_address = None;
+            self.open_address_view(address);
+        }
     }
 }
 
 struct TabViewer<'a> {
-    state: &'a mut AppState,
+    global: &'a mut Global,
 }
 
 impl egui_dock::TabViewer for TabViewer<'_> {
     type Tab = Box<dyn AppView>;
 
     fn ui(&mut self, ui: &mut Ui, tab: &mut Self::Tab) {
-        tab.ui(&mut self.state, ui);
+        tab.ui(&mut self.global, ui);
     }
 
     fn title(&mut self, tab: &mut Self::Tab) -> WidgetText {
@@ -226,8 +251,51 @@ impl egui_dock::TabViewer for TabViewer<'_> {
     }
 }
 
-pub struct AppState {
+#[derive(Default)]
+pub struct Global {
     data: Vec<u8>,
-    // action
+    // event
     go_to_address: Option<u64>,
+}
+
+struct GoToAddressWindow {
+    open: bool,
+    address: String,
+}
+
+impl GoToAddressWindow {
+    fn ui(&mut self, ui: &mut Ui) -> Option<u64> {
+        let mut address = None;
+        Window::new("Go To Address")
+            .open(&mut self.open)
+            .resizable(false)
+            .collapsible(false)
+            .show(ui.ctx(), |ui| {
+                Grid::new("").num_columns(2).show(ui, |ui| {
+                    ui.label("Address");
+                    ui.text_edit_singleline(&mut self.address);
+                    ui.end_row();
+                });
+                ui.with_layout(Layout::right_to_left(Align::TOP), |ui| {
+                    if ui.button("Go").clicked() {
+                        if let Ok(address_) = u64::from_str_radix(&self.address, 16) {
+                            address = Some(address_);
+                        }
+                    }
+                })
+            });
+        if address.is_some() {
+            self.open = false;
+        }
+        address
+    }
+}
+
+impl Default for GoToAddressWindow {
+    fn default() -> Self {
+        Self {
+            open: true,
+            address: Default::default(),
+        }
+    }
 }

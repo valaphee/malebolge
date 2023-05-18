@@ -25,14 +25,20 @@ impl Iterator for CfoPatcher<'_, '_> {
                             false
                         } else {
                             let mut align = true;
-                            // save address and position
+                            // store address and position
                             let address = self.decoder.ip();
                             let position = self.decoder.position();
                             // check if branch target is aligned, or a contrary instruction is found
                             let mut instruction_peek = Instruction::default();
-                            while self.decoder.can_decode() && self.decoder.ip() < branch_target && align {
+                            while self.decoder.can_decode()
+                                && self.decoder.ip() < branch_target
+                                && align
+                            {
                                 self.decoder.decode_out(&mut instruction_peek);
-                                if self.decoder.ip() == branch_target || instruction.code() == instruction_peek.code().negate_condition_code() {
+                                if self.decoder.ip() == branch_target
+                                    || instruction.code()
+                                        == instruction_peek.code().negate_condition_code()
+                                {
                                     align = false;
                                 }
                             }

@@ -4,18 +4,18 @@ use eframe::egui::{Align, Color32, Label, Layout, RichText, Sense, TextStyle, Ui
 use egui_extras::{Column, TableBuilder};
 use iced_x86::{Decoder, DecoderOptions, Formatter, FormatterTextKind, NasmFormatter};
 
-use crate::{warden, AppState, AppView};
+use crate::{warden, AppView, Global};
 
 pub struct AssemblyView {
     bitness: u32,
     address: u64,
     data_offset: usize,
     data_length: usize,
-    // state
+    // runtime
     last_address: u64,
     addresses: HashSet<u64>,
-    instructions: Vec<CachedInstruction>,
-    // action
+    instructions: Vec<Instruction>,
+    // event
     go_to_row: Option<usize>,
 }
 
@@ -39,7 +39,7 @@ impl AppView for AssemblyView {
         format!("Assembly ({:016X})", self.address).into()
     }
 
-    fn ui(&mut self, state: &mut AppState, ui: &mut Ui) {
+    fn ui(&mut self, state: &mut Global, ui: &mut Ui) {
         // render table
         let row_height = ui.text_style_height(&TextStyle::Monospace);
         let mut table_builder = TableBuilder::new(ui)
@@ -73,19 +73,19 @@ impl AppView for AssemblyView {
                         let mut decoder =
                             Decoder::with_ip(self.bitness, data, address, DecoderOptions::NONE);
                         decoder.set_position(position).unwrap();
-                        let instruction = warden::CfoPatcher::new(&mut decoder).next().unwrap();
-                        let mut cached_instruction = CachedInstruction::new(
-                            instruction.ip(),
-                            data[position..position + instruction.len()]
+                        let raw_instruction = warden::CfoPatcher::new(&mut decoder).next().unwrap();
+                        let mut instruction = Instruction::new(
+                            raw_instruction.ip(),
+                            data[position..position + raw_instruction.len()]
                                 .iter()
                                 .map(|&elem| format!("{:02X}", elem))
                                 .collect::<Vec<_>>()
                                 .join(" "),
                         );
-                        NasmFormatter::new().format(&instruction, &mut cached_instruction);
+                        NasmFormatter::new().format(&raw_instruction, &mut instruction);
                         self.last_address += (decoder.position() - position) as u64;
-                        self.addresses.insert(cached_instruction.address);
-                        self.instructions.push(cached_instruction);
+                        self.addresses.insert(instruction.address);
+                        self.instructions.push(instruction);
                         // validate addresses
                         for instruction in &mut self.instructions {
                             for (text, address) in &mut instruction.text {
@@ -156,13 +156,13 @@ impl AppView for AssemblyView {
     }
 }
 
-struct CachedInstruction {
+struct Instruction {
     address: u64,
     data: String,
     text: Vec<(RichText, Option<u64>)>,
 }
 
-impl CachedInstruction {
+impl Instruction {
     fn new(address: u64, data: String) -> Self {
         Self {
             address,
@@ -172,7 +172,7 @@ impl CachedInstruction {
     }
 }
 
-impl iced_x86::FormatterOutput for CachedInstruction {
+impl iced_x86::FormatterOutput for Instruction {
     fn write(&mut self, text: &str, kind: FormatterTextKind) {
         self.text.push(match kind {
             FormatterTextKind::LabelAddress | FormatterTextKind::FunctionAddress => (
