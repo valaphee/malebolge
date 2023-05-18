@@ -4,11 +4,7 @@ use eframe::egui::{Align, Color32, Label, Layout, RichText, Sense, TextStyle, Ui
 use egui_extras::{Column, TableBuilder};
 use iced_x86::{Decoder, DecoderOptions, Formatter, FormatterTextKind, NasmFormatter};
 
-use crate::{
-    project::{LabelWindow, Project},
-    tab::Tab,
-    warden,
-};
+use crate::{project::Project, tab::Tab, util::warden, LabelWindow};
 
 pub struct AssemblyTab {
     bitness: u32,

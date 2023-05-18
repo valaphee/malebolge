@@ -7,7 +7,10 @@ use std::{ffi::OsString, os::windows::prelude::*};
 
 use eframe::{
     egui,
-    egui::{Button, CentralPanel, Context, Frame, Key, RichText, TextStyle, Ui, Vec2, Window},
+    egui::{
+        Align, Button, CentralPanel, Context, Frame, Grid, Key, KeyboardShortcut, Layout,
+        Modifiers, RichText, TextStyle, Ui, Vec2, Window,
+    },
 };
 use egui_dock::{DockArea, Node, Tree};
 use egui_extras::{Column, TableBuilder};
@@ -27,13 +30,13 @@ use windows::Win32::{
 };
 
 use crate::{
-    project::Project,
+    project::{Label, LabelType, Project},
     tab::{assembly::AssemblyTab, label::LabelTab, raw::RawView, Tab, TabViewer},
 };
 
 mod project;
 mod tab;
-mod warden;
+mod util;
 
 pub fn main() -> eframe::Result<()> {
     eframe::run_native(
@@ -134,14 +137,39 @@ impl App {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &Context, frame: &mut eframe::Frame) {
+        let no_focus = ctx.memory(|memory| memory.focus().is_none());
         if let Some(project) = &mut self.project {
-            // render main
             CentralPanel::default()
                 .frame(Frame::none())
                 .show(ctx, |ui| {
                     // render dock area
                     DockArea::new(&mut self.tree).show_inside(ui, &mut TabViewer { project });
-                    project.ui(ui);
+                    // render "go to address" window
+                    if let Some(go_to_address_window) = &mut project.go_to_address_window {
+                        if let Some(address) = go_to_address_window.ui(ui) {
+                            project.go_to_address_window = None;
+                            project.go_to_address = Some(address);
+                        } else if !go_to_address_window.open {
+                            project.go_to_address_window = None;
+                        }
+                    }
+                    // render "label" window
+                    if let Some(label_window) = &mut project.label_window {
+                        if let Some(label) = label_window.ui(ui) {
+                            project.label_window = None;
+                            project.labels.insert(label.0, label.1);
+                        } else if !label_window.open {
+                            project.label_window = None;
+                        }
+                    }
+                    if no_focus
+                        && ui.input_mut(|input| {
+                            input.consume_shortcut(&KeyboardShortcut::new(Modifiers::NONE, Key::G))
+                        })
+                        && project.go_to_address_window.is_none()
+                    {
+                        project.go_to_address_window = Some(Default::default())
+                    }
                 });
             // go to address
             if let Some(address) = project.go_to_address {
@@ -188,10 +216,19 @@ impl eframe::App for App {
             });
         }
         // toggle fullscreen (F11)
-        if ctx.input(|input| input.key_pressed(Key::F11)) {
+        if no_focus
+            && ctx.input_mut(|input| {
+                input.consume_shortcut(&KeyboardShortcut::new(Modifiers::NONE, Key::F11))
+            })
+        {
             frame.set_fullscreen(!frame.info().window_info.fullscreen)
         }
     }
+}
+
+struct Process {
+    id: u32,
+    name: String,
 }
 
 struct AttachWindow {
@@ -301,7 +338,115 @@ impl AttachWindow {
     }
 }
 
-struct Process {
-    id: u32,
+pub struct GoToAddressWindow {
+    open: bool,
+    address: String,
+}
+
+impl GoToAddressWindow {
+    fn ui(&mut self, ui: &mut Ui) -> Option<u64> {
+        let mut address = None;
+        Window::new("Go To Address")
+            .open(&mut self.open)
+            .resizable(false)
+            .collapsible(false)
+            .show(ui.ctx(), |ui| {
+                Grid::new("").num_columns(2).show(ui, |ui| {
+                    ui.label("Address");
+                    ui.text_edit_singleline(&mut self.address);
+                    ui.end_row();
+                });
+                ui.with_layout(Layout::right_to_left(Align::TOP), |ui| {
+                    if ui.button("Go").clicked() {
+                        if let Ok(address_) = u64::from_str_radix(&self.address, 16) {
+                            address = Some(address_);
+                        }
+                    }
+                })
+            });
+        if address.is_some() {
+            self.open = false;
+        }
+        address
+    }
+}
+
+impl Default for GoToAddressWindow {
+    fn default() -> Self {
+        Self {
+            open: true,
+            address: Default::default(),
+        }
+    }
+}
+
+pub struct LabelWindow {
+    open: bool,
     name: String,
+    address: String,
+}
+
+impl LabelWindow {
+    pub fn new(name: String, address: u64) -> Self {
+        Self {
+            open: true,
+            name,
+            address: if address == 0 {
+                "".to_string()
+            } else {
+                format!("{:016X}", address)
+            },
+        }
+    }
+
+    fn ui(&mut self, ui: &mut Ui) -> Option<(u64, Label)> {
+        let mut label = None;
+        let mut close = false;
+        Window::new("Label")
+            .open(&mut self.open)
+            .resizable(false)
+            .collapsible(false)
+            .show(ui.ctx(), |ui| {
+                Grid::new("").num_columns(2).show(ui, |ui| {
+                    ui.label("Name");
+                    ui.text_edit_singleline(&mut self.name);
+                    ui.end_row();
+                    ui.label("Address");
+                    ui.text_edit_singleline(&mut self.address);
+                    ui.end_row();
+                });
+                ui.with_layout(Layout::right_to_left(Align::TOP), |ui| {
+                    if ui.button("Ok").clicked() {
+                        if !self.name.is_empty() {
+                            if let Ok(address) = u64::from_str_radix(&self.address, 16) {
+                                label = Some((
+                                    address,
+                                    Label {
+                                        type_: LabelType::Custom,
+                                        name: self.name.clone(),
+                                    },
+                                ));
+                            }
+                        }
+                    }
+                    if ui.button("Cancel").clicked() {
+                        close = true;
+                    }
+                })
+            });
+        if label.is_some() || close {
+            self.open = false;
+        }
+        label
+    }
+}
+
+impl Default for LabelWindow {
+    fn default() -> Self {
+        Self {
+            open: true,
+            name: Default::default(),
+            address: Default::default(),
+        }
+    }
 }

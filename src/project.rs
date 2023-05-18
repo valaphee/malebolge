@@ -1,7 +1,6 @@
 use std::{collections::BTreeMap, path::Path};
 
 use byteorder::{ReadBytesExt, LE};
-use eframe::egui::{Align, Grid, Layout, Ui, Window};
 use object::{
     coff::CoffHeader,
     pe,
@@ -9,6 +8,8 @@ use object::{
     read::pe::{ExportTarget, ImageNtHeaders, ImageOptionalHeader},
     LittleEndian, ReadRef,
 };
+
+use crate::{GoToAddressWindow, LabelWindow};
 
 pub struct Project {
     pub data: Vec<u8>,
@@ -95,69 +96,6 @@ impl Project {
             }
         }
     }
-
-    pub fn ui(&mut self, ui: &mut Ui) {
-        // render "go to address" window
-        if let Some(go_to_address_window) = &mut self.go_to_address_window {
-            if let Some(address) = go_to_address_window.ui(ui) {
-                self.go_to_address_window = None;
-                self.go_to_address = Some(address);
-            } else if !go_to_address_window.open {
-                self.go_to_address_window = None;
-            }
-        }
-        // render "label" window
-        if let Some(label_window) = &mut self.label_window {
-            if let Some(label) = label_window.ui(ui) {
-                self.label_window = None;
-                self.labels.insert(label.0, label.1);
-            } else if !label_window.open {
-                self.label_window = None;
-            }
-        }
-    }
-}
-
-pub struct GoToAddressWindow {
-    open: bool,
-    address: String,
-}
-
-impl GoToAddressWindow {
-    fn ui(&mut self, ui: &mut Ui) -> Option<u64> {
-        let mut address = None;
-        Window::new("Go To Address")
-            .open(&mut self.open)
-            .resizable(false)
-            .collapsible(false)
-            .show(ui.ctx(), |ui| {
-                Grid::new("").num_columns(2).show(ui, |ui| {
-                    ui.label("Address");
-                    ui.text_edit_singleline(&mut self.address);
-                    ui.end_row();
-                });
-                ui.with_layout(Layout::right_to_left(Align::TOP), |ui| {
-                    if ui.button("Go").clicked() {
-                        if let Ok(address_) = u64::from_str_radix(&self.address, 16) {
-                            address = Some(address_);
-                        }
-                    }
-                })
-            });
-        if address.is_some() {
-            self.open = false;
-        }
-        address
-    }
-}
-
-impl Default for GoToAddressWindow {
-    fn default() -> Self {
-        Self {
-            open: true,
-            address: Default::default(),
-        }
-    }
 }
 
 #[derive(Clone)]
@@ -172,75 +110,4 @@ pub enum LabelType {
     Export,
     TlsCallback,
     Custom,
-}
-
-pub struct LabelWindow {
-    open: bool,
-    name: String,
-    address: String,
-}
-
-impl LabelWindow {
-    pub fn new(name: String, address: u64) -> Self {
-        Self {
-            open: true,
-            name,
-            address: if address == 0 {
-                "".to_string()
-            } else {
-                format!("{:016X}", address)
-            },
-        }
-    }
-
-    fn ui(&mut self, ui: &mut Ui) -> Option<(u64, Label)> {
-        let mut label = None;
-        let mut close = false;
-        Window::new("Label")
-            .open(&mut self.open)
-            .resizable(false)
-            .collapsible(false)
-            .show(ui.ctx(), |ui| {
-                Grid::new("").num_columns(2).show(ui, |ui| {
-                    ui.label("Name");
-                    ui.text_edit_singleline(&mut self.name);
-                    ui.end_row();
-                    ui.label("Address");
-                    ui.text_edit_singleline(&mut self.address);
-                    ui.end_row();
-                });
-                ui.with_layout(Layout::right_to_left(Align::TOP), |ui| {
-                    if ui.button("Ok").clicked() {
-                        if !self.name.is_empty() {
-                            if let Ok(address) = u64::from_str_radix(&self.address, 16) {
-                                label = Some((
-                                    address,
-                                    Label {
-                                        type_: LabelType::Custom,
-                                        name: self.name.clone(),
-                                    },
-                                ));
-                            }
-                        }
-                    }
-                    if ui.button("Cancel").clicked() {
-                        close = true;
-                    }
-                })
-            });
-        if label.is_some() || close {
-            self.open = false;
-        }
-        label
-    }
-}
-
-impl Default for LabelWindow {
-    fn default() -> Self {
-        Self {
-            open: true,
-            name: Default::default(),
-            address: Default::default(),
-        }
-    }
 }
