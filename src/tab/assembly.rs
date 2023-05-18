@@ -4,9 +4,13 @@ use eframe::egui::{Align, Color32, Label, Layout, RichText, Sense, TextStyle, Ui
 use egui_extras::{Column, TableBuilder};
 use iced_x86::{Decoder, DecoderOptions, Formatter, FormatterTextKind, NasmFormatter};
 
-use crate::{view::label::LabelWindow, warden, AppView, Project};
+use crate::{
+    project::{LabelWindow, Project},
+    tab::Tab,
+    warden,
+};
 
-pub struct AssemblyView {
+pub struct AssemblyTab {
     bitness: u32,
     address: u64,
     data_offset: usize,
@@ -18,7 +22,7 @@ pub struct AssemblyView {
     go_to_row: Option<usize>,
 }
 
-impl AssemblyView {
+impl AssemblyTab {
     pub fn new(bitness: u32, address: u64, data_offset: usize, data_length: usize) -> Self {
         Self {
             bitness,
@@ -33,7 +37,7 @@ impl AssemblyView {
     }
 }
 
-impl AppView for AssemblyView {
+impl Tab for AssemblyTab {
     fn title(&self) -> String {
         format!("Assembly ({:016X})", self.address).into()
     }

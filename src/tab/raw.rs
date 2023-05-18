@@ -1,7 +1,7 @@
 use eframe::egui::{Label, RichText, TextStyle, Ui};
 use egui_extras::{Column, TableBuilder};
 
-use crate::{AppView, Project};
+use crate::{project::Project, tab::Tab};
 
 pub struct RawView {
     address: u64,
@@ -19,7 +19,7 @@ impl RawView {
     }
 }
 
-impl AppView for RawView {
+impl Tab for RawView {
     fn title(&self) -> String {
         format!("Raw ({:016X})", self.address)
     }

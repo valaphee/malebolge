@@ -1,16 +1,19 @@
 use eframe::{
     egui,
-    egui::{Grid, Layout, RichText, TextStyle, Ui, Window},
+    egui::{RichText, TextStyle, Ui},
 };
-use egui_dock::egui::{Align, Sense};
+use egui_dock::egui::Sense;
 use egui_extras::{Column, TableBuilder};
 
-use crate::{AppView, Project};
+use crate::{
+    project::{LabelType, Project},
+    tab::Tab,
+};
 
 #[derive(Default)]
-pub struct LabelView;
+pub struct LabelTab;
 
-impl AppView for LabelView {
+impl Tab for LabelTab {
     fn title(&self) -> String {
         "Labels".into()
     }
@@ -121,90 +124,5 @@ impl AppView for LabelView {
                 ui.close_menu();
             }
         });
-    }
-}
-
-#[derive(Clone)]
-pub struct Label {
-    pub type_: LabelType,
-    pub name: String,
-}
-
-#[derive(Clone)]
-pub enum LabelType {
-    EntryPoint,
-    Export,
-    TlsCallback,
-    Custom,
-}
-
-pub struct LabelWindow {
-    pub open: bool,
-    name: String,
-    address: String,
-}
-
-impl LabelWindow {
-    pub fn new(name: String, address: u64) -> Self {
-        Self {
-            open: true,
-            name,
-            address: if address == 0 {
-                "".to_string()
-            } else {
-                format!("{:016X}", address)
-            },
-        }
-    }
-
-    pub fn ui(&mut self, ui: &mut Ui) -> Option<(u64, Label)> {
-        let mut label = None;
-        let mut close = false;
-        Window::new("Label")
-            .open(&mut self.open)
-            .resizable(false)
-            .collapsible(false)
-            .show(ui.ctx(), |ui| {
-                Grid::new("").num_columns(2).show(ui, |ui| {
-                    ui.label("Name");
-                    ui.text_edit_singleline(&mut self.name);
-                    ui.end_row();
-                    ui.label("Address");
-                    ui.text_edit_singleline(&mut self.address);
-                    ui.end_row();
-                });
-                ui.with_layout(Layout::right_to_left(Align::TOP), |ui| {
-                    if ui.button("Ok").clicked() {
-                        if !self.name.is_empty() {
-                            if let Ok(address) = u64::from_str_radix(&self.address, 16) {
-                                label = Some((
-                                    address,
-                                    Label {
-                                        type_: LabelType::Custom,
-                                        name: self.name.clone(),
-                                    },
-                                ));
-                            }
-                        }
-                    }
-                    if ui.button("Cancel").clicked() {
-                        close = true;
-                    }
-                })
-            });
-        if label.is_some() || close {
-            self.open = false;
-        }
-        label
-    }
-}
-
-impl Default for LabelWindow {
-    fn default() -> Self {
-        Self {
-            open: true,
-            name: Default::default(),
-            address: Default::default(),
-        }
     }
 }
