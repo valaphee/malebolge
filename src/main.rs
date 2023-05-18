@@ -2,13 +2,14 @@
 #![windows_subsystem = "windows"]
 
 use std::{collections::BTreeMap, path::Path};
+use std::ffi::OsString;
+use std::os::windows::prelude::*;
 
 use byteorder::{ReadBytesExt, LE};
-use eframe::{
-    egui::{Button, CentralPanel, Context, Frame, Grid, Key, Layout, Ui, Vec2, WidgetText, Window},
-    emath::Align,
-};
+use eframe::{egui::{Button, CentralPanel, Context, Frame, Grid, Key, Layout, Ui, Vec2, WidgetText, Window}, egui, emath::Align};
+use eframe::egui::{RichText, TextStyle};
 use egui_dock::{DockArea, Node, Tree};
+use egui_extras::{Column, TableBuilder};
 use object::{
     coff::CoffHeader,
     pe,
@@ -16,6 +17,9 @@ use object::{
     read::pe::{ExportTarget, ImageNtHeaders, ImageOptionalHeader},
     LittleEndian, ReadRef,
 };
+use windows::Win32::Foundation::{CloseHandle, FALSE, HMODULE, MAX_PATH};
+use windows::Win32::System::ProcessStatus::{EnumProcesses, EnumProcessModules, GetModuleBaseNameW};
+use windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_INFORMATION, PROCESS_VM_READ};
 
 use crate::view::{
     assembly::AssemblyView,
@@ -42,6 +46,7 @@ pub fn main() -> eframe::Result<()> {
 struct App {
     project: Option<Project>,
     tree: Tree<Box<dyn AppView>>,
+    attach_window: Option<AttachWindow>,
 }
 
 impl App {
@@ -125,17 +130,7 @@ impl App {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &Context, frame: &mut eframe::Frame) {
-        // toggle fullscreen (F11)
-        if ctx.input(|input| input.key_pressed(Key::F11)) {
-            frame.set_fullscreen(!frame.info().window_info.fullscreen)
-        }
         if let Some(project) = &mut self.project {
-            // open "go to address" window
-            if ctx.input(|input| input.key_pressed(Key::G))
-                && project.go_to_address_window.is_none()
-            {
-                project.go_to_address_window = Some(Default::default())
-            }
             // render main
             CentralPanel::default()
                 .frame(Frame::none())
@@ -161,6 +156,12 @@ impl eframe::App for App {
                         }
                     }
                 });
+            // open "go to address" window
+            /*if ctx.input(|input| input.key_pressed(Key::G))
+                && project.go_to_address_window.is_none()
+            {
+                project.go_to_address_window = Some(Default::default())
+            }*/
             // go to address
             if let Some(address) = project.go_to_address {
                 project.go_to_address = None;
@@ -173,7 +174,6 @@ impl eframe::App for App {
         } else {
             CentralPanel::default().show(ctx, |ui| {
                 ui.vertical_centered(|ui| {
-                    // open project
                     if ui
                         .add(Button::new("Open File").min_size(Vec2::new(100.0, 25.0)))
                         .clicked()
@@ -187,9 +187,29 @@ impl eframe::App for App {
                     if ui
                         .add(Button::new("Attach Process").min_size(Vec2::new(100.0, 25.0)))
                         .clicked()
-                    {}
+                    {
+                        self.attach_window = Some(AttachWindow::new());
+                    }
+                    if ui
+                        .add(Button::new("Exit").min_size(Vec2::new(100.0, 25.0)))
+                        .clicked()
+                    {
+                        frame.close()
+                    }
                 });
+                // render "attach" window
+                if let Some(attach_window) = &mut self.attach_window {
+                    if let Some(process) = attach_window.ui(ui) {
+
+                    } else if !attach_window.open {
+                        self.attach_window = None;
+                    }
+                }
             });
+        }
+        // toggle fullscreen (F11)
+        if ctx.input(|input| input.key_pressed(Key::F11)) {
+            frame.set_fullscreen(!frame.info().window_info.fullscreen)
         }
     }
 }
@@ -336,4 +356,94 @@ impl Default for GoToAddressWindow {
             address: Default::default(),
         }
     }
+}
+
+struct AttachWindow {
+    open: bool,
+    processes: Vec<Process>,
+}
+
+impl AttachWindow {
+    fn new() -> Self {
+        let mut self_ = Self {
+            open: true,
+            processes: Default::default(),
+        };
+        self_.load_processes();
+        self_
+    }
+
+    fn load_processes(&mut self) {
+        self.processes.clear();
+        unsafe {
+            let mut pids = [0; 4096];
+            let mut pids_length = 0;
+            if EnumProcesses(pids.as_mut_ptr(), std::mem::size_of_val(&pids) as u32, &mut pids_length).into() {
+                for &pid in &pids[..pids_length as usize / std::mem::size_of::<u32>()] {
+                    let Ok(process) = OpenProcess(PROCESS_VM_READ | PROCESS_QUERY_INFORMATION, FALSE, pid) else {
+                        continue;
+                    };
+                    if process.is_invalid() {
+                        continue;
+                    }
+                    let mut module = HMODULE::default();
+                    if EnumProcessModules(process, &mut module, std::mem::size_of_val(&module) as u32, &mut 0).into() {
+                        let mut module_base_name = [0; MAX_PATH as usize];
+                        GetModuleBaseNameW(process, module, &mut module_base_name);
+                        self.processes.push(Process {
+                            id: pid,
+                            name: OsString::from_wide(module_base_name.split(|&elem| elem == 0).next().unwrap()).into_string().ok().unwrap(),
+                        });
+                    }
+                    CloseHandle(process);
+                }
+            }
+        }
+    }
+
+    fn ui(&mut self, ui: &mut Ui) -> Option<()> {
+        let mut process = None;
+        Window::new("Attach")
+            .open(&mut self.open)
+            .resizable(false)
+            .collapsible(false)
+            .show(ui.ctx(), |ui| {
+                // render table
+                let row_height = ui.text_style_height(&TextStyle::Monospace);
+                TableBuilder::new(ui)
+                    .min_scrolled_height(0.0)
+                    .max_scroll_height(f32::INFINITY)
+                    .column(Column::auto())
+                    .column(Column::remainder())
+                    .body(|mut body| {
+                        for process in &self.processes {
+                            body.row(row_height, |mut row| {
+                                // render pid column
+                                row.col(|ui| {
+                                    ui.add(
+                                        egui::Label::new(RichText::from(format!("{}", process.id)).monospace())
+                                            .wrap(false),
+                                    );
+                                });
+                                // render name column
+                                row.col(|ui| {
+                                    ui.add(
+                                        egui::Label::new(RichText::from(format!("{}", process.name)).monospace())
+                                            .wrap(false),
+                                    );
+                                });
+                            });
+                        }
+                    });
+            });
+        if process.is_some() {
+            self.open = false;
+        }
+        process
+    }
+}
+
+struct Process {
+    id: u32,
+    name: String,
 }
