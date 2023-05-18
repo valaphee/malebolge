@@ -4,7 +4,7 @@ use eframe::egui::{Align, Color32, Label, Layout, RichText, Sense, TextStyle, Ui
 use egui_extras::{Column, TableBuilder};
 use iced_x86::{Decoder, DecoderOptions, Formatter, FormatterTextKind, NasmFormatter};
 
-use crate::{warden, AppView, Project};
+use crate::{view::label::LabelWindow, warden, AppView, Project};
 
 pub struct AssemblyView {
     bitness: u32,
@@ -15,7 +15,6 @@ pub struct AssemblyView {
     last_address: u64,
     addresses: HashSet<u64>,
     instructions: Vec<Instruction>,
-    // event
     go_to_row: Option<usize>,
 }
 
@@ -46,7 +45,7 @@ impl AppView for AssemblyView {
             .min_scrolled_height(0.0)
             .max_scroll_height(f32::INFINITY)
             .column(Column::auto())
-            .column(Column::auto().resizable(true))
+            .columns(Column::auto().resizable(true), 2)
             .column(Column::remainder());
         table_builder = if let Some(row) = self.go_to_row {
             self.go_to_row = None;
@@ -101,7 +100,9 @@ impl AppView for AssemblyView {
                         }
                         &self.instructions[index]
                     };
-                    // render cols
+                    // get label
+                    let label = project.labels.get(&instruction.address);
+                    // render address column
                     row.col(|ui| {
                         ui.add(
                             Label::new(
@@ -118,13 +119,7 @@ impl AppView for AssemblyView {
                                     });
                                     ui.close_menu();
                                 }
-                                if ui.button("Data").clicked() {
-                                    ui.output_mut(|output| {
-                                        output.copied_text = instruction.data.clone()
-                                    });
-                                    ui.close_menu();
-                                }
-                                if ui.button("Text").clicked() {
+                                if ui.button("Instruction").clicked() {
                                     ui.output_mut(|output| {
                                         output.copied_text = instruction
                                             .text
@@ -135,13 +130,22 @@ impl AppView for AssemblyView {
                                     ui.close_menu();
                                 }
                             });
+                            if ui.button("Label").clicked() && project.label_window.is_none() {
+                                project.label_window = Some(LabelWindow::new(
+                                    label.map_or("".to_string(), |label| label.name.clone()),
+                                    instruction.address,
+                                ));
+                                ui.close_menu();
+                            }
                         });
                     });
+                    // render raw column
                     row.col(|ui| {
                         ui.add(
                             Label::new(RichText::from(&instruction.data).monospace()).wrap(false),
                         );
                     });
+                    // render instruction column
                     row.col(|ui| {
                         ui.with_layout(Layout::left_to_right(Align::Min), |ui| {
                             ui.spacing_mut().item_spacing = Vec2::ZERO;
@@ -176,6 +180,12 @@ impl AppView for AssemblyView {
                                 }
                             }
                         });
+                    });
+                    // render comment column
+                    row.col(|ui| {
+                        if let Some(label) = label {
+                            ui.monospace(&label.name);
+                        }
                     });
                 },
             );

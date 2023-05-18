@@ -1,8 +1,7 @@
 #![feature(int_roundings)]
 #![windows_subsystem = "windows"]
 
-use std::collections::BTreeMap;
-use std::path::Path;
+use std::{collections::BTreeMap, path::Path};
 
 use byteorder::{ReadBytesExt, LE};
 use eframe::{
@@ -20,7 +19,7 @@ use object::{
 
 use crate::view::{
     assembly::AssemblyView,
-    label::{Label, LabelType, LabelView},
+    label::{Label, LabelType, LabelView, LabelWindow},
     raw::RawView,
     AppView,
 };
@@ -43,8 +42,6 @@ pub fn main() -> eframe::Result<()> {
 struct App {
     project: Option<Project>,
     tree: Tree<Box<dyn AppView>>,
-    // runtime
-    go_to_address_window: Option<GoToAddressWindow>,
 }
 
 impl App {
@@ -134,21 +131,33 @@ impl eframe::App for App {
         }
         if let Some(project) = &mut self.project {
             // open "go to address" window
-            if ctx.input(|input| input.key_pressed(Key::G)) && self.go_to_address_window.is_none() {
-                self.go_to_address_window = Some(Default::default())
+            if ctx.input(|input| input.key_pressed(Key::G))
+                && project.go_to_address_window.is_none()
+            {
+                project.go_to_address_window = Some(Default::default())
             }
+            // render main
             CentralPanel::default()
                 .frame(Frame::none())
                 .show(ctx, |ui| {
                     // render dock area
                     DockArea::new(&mut self.tree).show_inside(ui, &mut TabViewer { project });
                     // render "go to address" window
-                    if let Some(go_to_address_window) = &mut self.go_to_address_window {
+                    if let Some(go_to_address_window) = &mut project.go_to_address_window {
                         if let Some(address) = go_to_address_window.ui(ui) {
-                            self.go_to_address_window = None;
+                            project.go_to_address_window = None;
                             project.go_to_address = Some(address);
                         } else if !go_to_address_window.open {
-                            self.go_to_address_window = None;
+                            project.go_to_address_window = None;
+                        }
+                    }
+                    // render "label" window
+                    if let Some(label_window) = &mut project.label_window {
+                        if let Some(label) = label_window.ui(ui) {
+                            project.label_window = None;
+                            project.labels.insert(label.0, label.1);
+                        } else if !label_window.open {
+                            project.label_window = None;
                         }
                     }
                 });
@@ -204,8 +213,10 @@ impl egui_dock::TabViewer for TabViewer<'_> {
 pub struct Project {
     labels: BTreeMap<u64, Label>,
     data: Vec<u8>,
-    // event
+    // runtime
     go_to_address: Option<u64>,
+    go_to_address_window: Option<GoToAddressWindow>,
+    label_window: Option<LabelWindow>,
 }
 
 impl Project {
@@ -217,6 +228,8 @@ impl Project {
             labels: Self::parse_labels(&data),
             data,
             go_to_address: None,
+            go_to_address_window: None,
+            label_window: None,
         }
     }
 
@@ -230,19 +243,25 @@ impl Project {
         let sections = file_header.sections(data, nt_header_offset).unwrap();
         let mut labels = BTreeMap::new();
         if optional_header.address_of_entry_point() != 0 {
-            labels.insert(optional_header.address_of_entry_point() as u64 + optional_header.image_base(), Label::new(
-                LabelType::EntryPoint,
-                "".to_string(),
-            ));
+            labels.insert(
+                optional_header.address_of_entry_point() as u64 + optional_header.image_base(),
+                Label {
+                    type_: LabelType::EntryPoint,
+                    name: "Entry point".to_string(),
+                },
+            );
         }
         if let Some(export_table) = data_directories.export_table(data, &sections).unwrap() {
             for export in export_table.exports().unwrap() {
                 match export.target {
                     ExportTarget::Address(relative_address) => {
-                        labels.insert(relative_address as u64 + optional_header.image_base(), Label::new(
-                            LabelType::Export,
-                            String::from_utf8_lossy(export.name.unwrap()).to_string(),
-                        ));
+                        labels.insert(
+                            relative_address as u64 + optional_header.image_base(),
+                            Label {
+                                type_: LabelType::Export,
+                                name: String::from_utf8_lossy(export.name.unwrap()).to_string(),
+                            },
+                        );
                     }
                     _ => {}
                 }
@@ -261,10 +280,13 @@ impl Project {
                             if callback == 0 {
                                 break;
                             }
-                            labels.insert(callback, Label::new(
-                                LabelType::TlsCallback,
-                                "".to_string(),
-                            ));
+                            labels.insert(
+                                callback,
+                                Label {
+                                    type_: LabelType::TlsCallback,
+                                    name: "TLS callback".to_string(),
+                                },
+                            );
                         }
                     }
                 }

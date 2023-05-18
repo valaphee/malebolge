@@ -8,10 +8,7 @@ use egui_extras::{Column, TableBuilder};
 use crate::{AppView, Project};
 
 #[derive(Default)]
-pub struct LabelView {
-    // runtime
-    new_label_window: Option<NewLabelWindow>,
-}
+pub struct LabelView;
 
 impl AppView for LabelView {
     fn title(&self) -> String {
@@ -40,24 +37,27 @@ impl AppView for LabelView {
                 });
             })
             .body(|mut body| {
+                let mut remove_label = None;
                 // render rows
                 for (label_address, label) in project.labels.iter() {
                     body.row(row_height, |mut row| {
-                        // render cols
+                        // render address column
                         row.col(|ui| {
                             if ui
                                 .add(
                                     egui::Label::new(
-                                        RichText::from(format!("{:016X}", label_address)).monospace(),
+                                        RichText::from(format!("{:016X}", label_address))
+                                            .monospace(),
                                     )
-                                        .wrap(false)
-                                        .sense(Sense::click()),
+                                    .wrap(false)
+                                    .sense(Sense::click()),
                                 )
                                 .context_menu(|ui| {
                                     ui.menu_button("Copy", |ui| {
                                         if ui.button("VA").clicked() {
                                             ui.output_mut(|output| {
-                                                output.copied_text = format!("{:016X}", label_address)
+                                                output.copied_text =
+                                                    format!("{:016X}", label_address)
                                             });
                                             ui.close_menu();
                                         }
@@ -68,12 +68,17 @@ impl AppView for LabelView {
                                             ui.close_menu();
                                         }
                                     });
+                                    if ui.button("Remove").clicked() {
+                                        remove_label = Some(*label_address);
+                                        ui.close_menu();
+                                    }
                                 })
                                 .clicked()
                             {
                                 project.go_to_address = Some(*label_address)
                             }
                         });
+                        // render type column
                         row.col(|ui| {
                             ui.add(
                                 egui::Label::new(
@@ -83,28 +88,26 @@ impl AppView for LabelView {
                                         LabelType::TlsCallback => "TLS callback",
                                         LabelType::Custom => "Custom",
                                     })
-                                        .monospace(),
+                                    .monospace(),
                                 )
-                                    .wrap(false),
+                                .wrap(false),
                             );
                         });
+                        // render name column
                         row.col(|ui| {
                             ui.add(
-                                egui::Label::new(RichText::from(&label.name).monospace()).wrap(false),
+                                egui::Label::new(RichText::from(&label.name).monospace())
+                                    .wrap(false),
                             );
                         });
                     });
                 }
+                // remove label
+                if let Some(address) = remove_label {
+                    project.labels.remove(&address);
+                }
             });
-        // render "add label" window
-        if let Some(add_label_window) = &mut self.new_label_window {
-            if let Some(label) = add_label_window.ui(ui) {
-                self.new_label_window = None;
-                project.labels.insert(label.0, label.1);
-            } else if !add_label_window.open {
-                self.new_label_window = None;
-            }
-        }
+
         // render context menu
         ui.interact(
             ui.available_rect_before_wrap(),
@@ -112,9 +115,9 @@ impl AppView for LabelView {
             Sense::click(),
         )
         .context_menu(|ui| {
-            // open "new label" window
-            if ui.button("New Label").clicked() && self.new_label_window.is_none() {
-                self.new_label_window = Some(Default::default());
+            // open "label" window
+            if ui.button("Add Label").clicked() && project.label_window.is_none() {
+                project.label_window = Some(Default::default());
                 ui.close_menu();
             }
         });
@@ -123,17 +126,8 @@ impl AppView for LabelView {
 
 #[derive(Clone)]
 pub struct Label {
-    type_: LabelType,
-    name: String,
-}
-
-impl Label {
-    pub fn new(type_: LabelType, name: String) -> Self {
-        Self {
-            type_,
-            name,
-        }
-    }
+    pub type_: LabelType,
+    pub name: String,
 }
 
 #[derive(Clone)]
@@ -144,16 +138,29 @@ pub enum LabelType {
     Custom,
 }
 
-struct NewLabelWindow {
-    open: bool,
+pub struct LabelWindow {
+    pub open: bool,
     name: String,
     address: String,
 }
 
-impl NewLabelWindow {
-    fn ui(&mut self, ui: &mut Ui) -> Option<(u64, Label)> {
+impl LabelWindow {
+    pub fn new(name: String, address: u64) -> Self {
+        Self {
+            open: true,
+            name,
+            address: if address == 0 {
+                "".to_string()
+            } else {
+                format!("{:016X}", address)
+            },
+        }
+    }
+
+    pub fn ui(&mut self, ui: &mut Ui) -> Option<(u64, Label)> {
         let mut label = None;
-        Window::new("New Label")
+        let mut close = false;
+        Window::new("Label")
             .open(&mut self.open)
             .resizable(false)
             .collapsible(false)
@@ -167,24 +174,32 @@ impl NewLabelWindow {
                     ui.end_row();
                 });
                 ui.with_layout(Layout::right_to_left(Align::TOP), |ui| {
-                    if ui.button("Add").clicked() {
+                    if ui.button("Ok").clicked() {
                         if !self.name.is_empty() {
                             if let Ok(address) = u64::from_str_radix(&self.address, 16) {
-                                label =
-                                    Some((address, Label::new(LabelType::Custom, self.name.clone())));
+                                label = Some((
+                                    address,
+                                    Label {
+                                        type_: LabelType::Custom,
+                                        name: self.name.clone(),
+                                    },
+                                ));
                             }
                         }
                     }
+                    if ui.button("Cancel").clicked() {
+                        close = true;
+                    }
                 })
             });
-        if label.is_some() {
+        if label.is_some() || close {
             self.open = false;
         }
         label
     }
 }
 
-impl Default for NewLabelWindow {
+impl Default for LabelWindow {
     fn default() -> Self {
         Self {
             open: true,
