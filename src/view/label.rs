@@ -39,51 +39,68 @@ impl AppView for LabelView {
                     ui.monospace("Name");
                 });
             })
-            .body(|body| {
+            .body(|mut body| {
                 // render rows
-                body.rows(row_height, project.labels.len(), |index, mut row| {
-                    let label = &project.labels[index];
-                    // render cols
-                    row.col(|ui| {
-                        if ui
-                            .add(
-                                egui::Label::new(
-                                    RichText::from(format!("{:016X}", label.address)).monospace(),
+                for (label_address, label) in project.labels.iter() {
+                    body.row(row_height, |mut row| {
+                        // render cols
+                        row.col(|ui| {
+                            if ui
+                                .add(
+                                    egui::Label::new(
+                                        RichText::from(format!("{:016X}", label_address)).monospace(),
+                                    )
+                                        .wrap(false)
+                                        .sense(Sense::click()),
                                 )
-                                .wrap(false)
-                                .sense(Sense::click()),
-                            )
-                            .clicked()
-                        {
-                            project.go_to_address = Some(label.address)
-                        }
-                    });
-                    row.col(|ui| {
-                        ui.add(
-                            egui::Label::new(
-                                RichText::from(match label.type_ {
-                                    LabelType::EntryPoint => "Entry point",
-                                    LabelType::Export => "Export",
-                                    LabelType::TlsCallback => "TLS callback",
-                                    LabelType::Custom => "Custom",
+                                .context_menu(|ui| {
+                                    ui.menu_button("Copy", |ui| {
+                                        if ui.button("VA").clicked() {
+                                            ui.output_mut(|output| {
+                                                output.copied_text = format!("{:016X}", label_address)
+                                            });
+                                            ui.close_menu();
+                                        }
+                                        if ui.button("Name").clicked() {
+                                            ui.output_mut(|output| {
+                                                output.copied_text = label.name.clone()
+                                            });
+                                            ui.close_menu();
+                                        }
+                                    });
                                 })
-                                .monospace(),
-                            )
-                            .wrap(false),
-                        );
+                                .clicked()
+                            {
+                                project.go_to_address = Some(*label_address)
+                            }
+                        });
+                        row.col(|ui| {
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::from(match label.type_ {
+                                        LabelType::EntryPoint => "Entry point",
+                                        LabelType::Export => "Export",
+                                        LabelType::TlsCallback => "TLS callback",
+                                        LabelType::Custom => "Custom",
+                                    })
+                                        .monospace(),
+                                )
+                                    .wrap(false),
+                            );
+                        });
+                        row.col(|ui| {
+                            ui.add(
+                                egui::Label::new(RichText::from(&label.name).monospace()).wrap(false),
+                            );
+                        });
                     });
-                    row.col(|ui| {
-                        ui.add(
-                            egui::Label::new(RichText::from(&label.name).monospace()).wrap(false),
-                        );
-                    });
-                });
+                }
             });
         // render "add label" window
         if let Some(add_label_window) = &mut self.new_label_window {
             if let Some(label) = add_label_window.ui(ui) {
                 self.new_label_window = None;
-                project.labels.push(label);
+                project.labels.insert(label.0, label.1);
             } else if !add_label_window.open {
                 self.new_label_window = None;
             }
@@ -106,15 +123,13 @@ impl AppView for LabelView {
 
 #[derive(Clone)]
 pub struct Label {
-    address: u64,
     type_: LabelType,
     name: String,
 }
 
 impl Label {
-    pub fn new(address: u64, type_: LabelType, name: String) -> Self {
+    pub fn new(type_: LabelType, name: String) -> Self {
         Self {
-            address,
             type_,
             name,
         }
@@ -136,7 +151,7 @@ struct NewLabelWindow {
 }
 
 impl NewLabelWindow {
-    fn ui(&mut self, ui: &mut Ui) -> Option<Label> {
+    fn ui(&mut self, ui: &mut Ui) -> Option<(u64, Label)> {
         let mut label = None;
         Window::new("New Label")
             .open(&mut self.open)
@@ -156,7 +171,7 @@ impl NewLabelWindow {
                         if !self.name.is_empty() {
                             if let Ok(address) = u64::from_str_radix(&self.address, 16) {
                                 label =
-                                    Some(Label::new(address, LabelType::Custom, self.name.clone()));
+                                    Some((address, Label::new(LabelType::Custom, self.name.clone())));
                             }
                         }
                     }

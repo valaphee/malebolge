@@ -1,11 +1,12 @@
 #![feature(int_roundings)]
 #![windows_subsystem = "windows"]
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use byteorder::{ReadBytesExt, LE};
 use eframe::{
-    egui::{CentralPanel, Context, Frame, Grid, Key, Layout, Ui, WidgetText, Window},
+    egui::{Button, CentralPanel, Context, Frame, Grid, Key, Layout, Ui, Vec2, WidgetText, Window},
     emath::Align,
 };
 use egui_dock::{DockArea, Node, Tree};
@@ -128,14 +129,12 @@ impl App {
 impl eframe::App for App {
     fn update(&mut self, ctx: &Context, frame: &mut eframe::Frame) {
         // toggle fullscreen (F11)
-        if ctx.input(|input_state| input_state.key_pressed(Key::F11)) {
+        if ctx.input(|input| input.key_pressed(Key::F11)) {
             frame.set_fullscreen(!frame.info().window_info.fullscreen)
         }
         if let Some(project) = &mut self.project {
             // open "go to address" window
-            if ctx.input(|input_state| input_state.key_pressed(Key::G))
-                && self.go_to_address_window.is_none()
-            {
+            if ctx.input(|input| input.key_pressed(Key::G)) && self.go_to_address_window.is_none() {
                 self.go_to_address_window = Some(Default::default())
             }
             CentralPanel::default()
@@ -158,17 +157,28 @@ impl eframe::App for App {
                 project.go_to_address = None;
                 self.open_address_view(address);
             }
+            // close project if tree is empty
+            if self.tree.is_empty() {
+                self.project = None;
+            }
         } else {
             CentralPanel::default().show(ctx, |ui| {
                 ui.vertical_centered(|ui| {
-                    if ui.button("Open File").clicked() {
+                    // open project
+                    if ui
+                        .add(Button::new("Open File").min_size(Vec2::new(100.0, 25.0)))
+                        .clicked()
+                    {
                         let Some(path) = rfd::FileDialog::new().pick_file() else {
-                                todo!()
-                            };
+                            todo!()
+                        };
                         self.project = Some(Project::new(path));
                         self.open_label_view();
                     }
-                    if ui.button("Attach Process").clicked() {}
+                    if ui
+                        .add(Button::new("Attach Process").min_size(Vec2::new(100.0, 25.0)))
+                        .clicked()
+                    {}
                 });
             });
         }
@@ -192,7 +202,7 @@ impl egui_dock::TabViewer for TabViewer<'_> {
 }
 
 pub struct Project {
-    labels: Vec<Label>,
+    labels: BTreeMap<u64, Label>,
     data: Vec<u8>,
     // event
     go_to_address: Option<u64>,
@@ -210,7 +220,7 @@ impl Project {
         }
     }
 
-    fn parse_labels(data: &[u8]) -> Vec<Label> {
+    fn parse_labels(data: &[u8]) -> BTreeMap<u64, Label> {
         let dos_header = ImageDosHeader::parse(data).unwrap();
         let mut nt_header_offset = dos_header.nt_headers_offset().into();
         let (nt_headers, data_directories) =
@@ -218,10 +228,9 @@ impl Project {
         let file_header = nt_headers.file_header();
         let optional_header = nt_headers.optional_header();
         let sections = file_header.sections(data, nt_header_offset).unwrap();
-        let mut labels = vec![];
+        let mut labels = BTreeMap::new();
         if optional_header.address_of_entry_point() != 0 {
-            labels.push(Label::new(
-                optional_header.address_of_entry_point() as u64 + optional_header.image_base(),
+            labels.insert(optional_header.address_of_entry_point() as u64 + optional_header.image_base(), Label::new(
                 LabelType::EntryPoint,
                 "".to_string(),
             ));
@@ -230,8 +239,7 @@ impl Project {
             for export in export_table.exports().unwrap() {
                 match export.target {
                     ExportTarget::Address(relative_address) => {
-                        labels.push(Label::new(
-                            relative_address as u64 + optional_header.image_base(),
+                        labels.insert(relative_address as u64 + optional_header.image_base(), Label::new(
                             LabelType::Export,
                             String::from_utf8_lossy(export.name.unwrap()).to_string(),
                         ));
@@ -253,8 +261,7 @@ impl Project {
                             if callback == 0 {
                                 break;
                             }
-                            labels.push(Label::new(
-                                callback,
+                            labels.insert(callback, Label::new(
                                 LabelType::TlsCallback,
                                 "".to_string(),
                             ));

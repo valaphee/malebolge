@@ -107,8 +107,35 @@ impl AppView for AssemblyView {
                             Label::new(
                                 RichText::from(format!("{:016X}", instruction.address)).monospace(),
                             )
-                            .wrap(false),
-                        );
+                            .wrap(false)
+                            .sense(Sense::click()),
+                        )
+                        .context_menu(|ui| {
+                            ui.menu_button("Copy", |ui| {
+                                if ui.button("VA").clicked() {
+                                    ui.output_mut(|output| {
+                                        output.copied_text = format!("{:016X}", instruction.address)
+                                    });
+                                    ui.close_menu();
+                                }
+                                if ui.button("Data").clicked() {
+                                    ui.output_mut(|output| {
+                                        output.copied_text = instruction.data.clone()
+                                    });
+                                    ui.close_menu();
+                                }
+                                if ui.button("Text").clicked() {
+                                    ui.output_mut(|output| {
+                                        output.copied_text = instruction
+                                            .text
+                                            .iter()
+                                            .map(|(text, _)| text.text())
+                                            .collect()
+                                    });
+                                    ui.close_menu();
+                                }
+                            });
+                        });
                     });
                     row.col(|ui| {
                         ui.add(
