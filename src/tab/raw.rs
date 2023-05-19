@@ -25,10 +25,10 @@ impl Tab for RawView {
     }
 
     fn ui(&mut self, project: &mut Project, ui: &mut Ui) {
-        let data = &project.data
-            [self.data_offset as usize..(self.data_offset + self.data_length) as usize];
         // render table
         let row_height = ui.text_style_height(&TextStyle::Monospace);
+        let data = &project.data
+            [self.data_offset as usize..(self.data_offset + self.data_length) as usize];
         TableBuilder::new(ui)
             .min_scrolled_height(0.0)
             .max_scroll_height(f32::INFINITY)

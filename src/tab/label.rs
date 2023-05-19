@@ -25,8 +25,7 @@ impl Tab for LabelTab {
             .striped(true)
             .min_scrolled_height(0.0)
             .max_scroll_height(f32::INFINITY)
-            .column(Column::auto())
-            .column(Column::auto().resizable(true))
+            .columns(Column::auto(), 2)
             .column(Column::remainder())
             .header(row_height, |mut row| {
                 row.col(|ui| {
