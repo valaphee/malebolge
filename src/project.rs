@@ -1,17 +1,29 @@
 use std::{collections::BTreeMap, path::Path};
 
 use byteorder::{ReadBytesExt, LE};
-use object::{
-    coff::CoffHeader,
-    pe,
-    pe::{ImageDosHeader, ImageNtHeaders64, ImageTlsDirectory64},
-    read::pe::{ExportTarget, ImageNtHeaders, ImageOptionalHeader},
-    LittleEndian, ReadRef,
-};
+use object::{pe, pe::ImageTlsDirectory64, read::pe::{ExportTarget, ImageNtHeaders, ImageOptionalHeader}, LittleEndian, ReadRef, Object};
+use object::coff::CoffHeader;
+use object::read::pe::PeFile64;
+use thiserror::Error;
+use windows::Win32::Foundation::{CloseHandle, FALSE, HMODULE};
+use windows::Win32::System::Diagnostics::Debug::ReadProcessMemory;
+use windows::Win32::System::ProcessStatus::{EnumProcessModules, GetModuleInformation, MODULEINFO};
+use windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_INFORMATION, PROCESS_VM_READ};
 
 use crate::{GoToAddressWindow, LabelWindow};
 
+pub type Result<T> = std::result::Result<T, Error>;
+
+#[derive(Error, Debug)]
+pub enum Error {
+    #[error("IO error")]
+    Io(#[from] std::io::Error),
+    #[error("Windows error")]
+    Windows(#[from] windows::core::Error)
+}
+
 pub struct Project {
+    pub va_space: bool,
     pub data: Vec<u8>,
     pub labels: BTreeMap<u64, Label>,
     // runtime
@@ -21,45 +33,67 @@ pub struct Project {
 }
 
 impl Project {
-    pub fn new(path: impl AsRef<Path>) -> Self {
-        let Ok(data) = std::fs::read(path) else {
-            todo!()
-        };
-        let mut self_ = Self {
+    pub fn open_path(path: impl AsRef<Path>) -> Result<Self> {
+        let data = std::fs::read(path)?;
+        let mut project = Self {
+            va_space: false,
             data,
             labels: Default::default(),
             go_to_address: None,
             go_to_address_window: None,
             label_window: None,
         };
-        self_.refresh();
-        self_
+        project.refresh();
+        Ok(project)
+    }
+
+    pub fn open_pid(pid: u32) -> Result<Self> {
+        let data = unsafe {
+            let process = OpenProcess(PROCESS_VM_READ | PROCESS_QUERY_INFORMATION, FALSE, pid)?;
+            let mut module = HMODULE::default();
+            EnumProcessModules(
+                process,
+                &mut module,
+                std::mem::size_of_val(&module) as u32,
+                &mut 0,
+            ).ok()?;
+            let mut module_info = MODULEINFO::default();
+            GetModuleInformation(process, module, &mut module_info, std::mem::size_of_val(&module_info) as u32).ok()?;
+            let mut data = vec![0; module_info.SizeOfImage as usize];
+            ReadProcessMemory(process, module_info.lpBaseOfDll, data.as_mut_ptr() as *mut std::ffi::c_void, data.len(), None);
+            CloseHandle(process).ok()?;
+            data
+        };
+        let mut project = Self {
+            va_space: true,
+            data,
+            labels: Default::default(),
+            go_to_address: None,
+            go_to_address_window: None,
+            label_window: None,
+        };
+        project.refresh();
+        Ok(project)
     }
 
     pub fn refresh(&mut self) {
-        let data = self.data.as_slice();
-        let dos_header = ImageDosHeader::parse(data).unwrap();
-        let mut nt_header_offset = dos_header.nt_headers_offset().into();
-        let (nt_headers, data_directories) =
-            ImageNtHeaders64::parse(data, &mut nt_header_offset).unwrap();
-        let file_header = nt_headers.file_header();
-        let optional_header = nt_headers.optional_header();
-        let sections = file_header.sections(data, nt_header_offset).unwrap();
-        if optional_header.address_of_entry_point() != 0 {
+        let file = PeFile64::parse(self.data.as_slice(), self.va_space).unwrap();
+        // refresh labels
+        if file.nt_headers().optional_header().address_of_entry_point() != 0 {
             self.labels.insert(
-                optional_header.address_of_entry_point() as u64 + optional_header.image_base(),
+                file.nt_headers().optional_header().address_of_entry_point() as u64 + file.relative_address_base(),
                 Label {
                     type_: LabelType::EntryPoint,
                     name: "Entry point".to_string(),
                 },
             );
         }
-        if let Some(export_table) = data_directories.export_table(data, &sections).unwrap() {
+        if let Some(export_table) = file.export_table().unwrap() {
             for export in export_table.exports().unwrap() {
                 match export.target {
                     ExportTarget::Address(relative_address) => {
                         self.labels.insert(
-                            relative_address as u64 + optional_header.image_base(),
+                            relative_address as u64 + file.relative_address_base(),
                             Label {
                                 type_: LabelType::Export,
                                 name: String::from_utf8_lossy(export.name.unwrap()).to_string(),
@@ -70,13 +104,13 @@ impl Project {
                 }
             }
         }
-        if let Some(directory) = data_directories.get(pe::IMAGE_DIRECTORY_ENTRY_TLS) {
-            if let Ok(directory_data) = directory.data(data, &sections) {
+        if let Some(directory) = file.data_directory(pe::IMAGE_DIRECTORY_ENTRY_TLS) {
+            if let Ok(directory_data) = directory.data(file.data(), &file.section_table()) {
                 if let Ok(tls_directory) = directory_data.read_at::<ImageTlsDirectory64>(0) {
-                    if let Some(mut callback_data) = sections.pe_data_at(
-                        data,
+                    if let Some(mut callback_data) = file.section_table().pe_data_at(
+                        file.data(),
                         (tls_directory.address_of_call_backs.get(LittleEndian)
-                            - optional_header.image_base()) as u32,
+                            - file.relative_address_base()) as u32,
                     ) {
                         loop {
                             let callback = callback_data.read_u64::<LE>().unwrap();

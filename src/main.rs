@@ -9,18 +9,13 @@ use eframe::{
     egui,
     egui::{
         Align, Button, CentralPanel, Context, Frame, Grid, Key, KeyboardShortcut, Layout,
-        Modifiers, RichText, TextStyle, Ui, Vec2, Window,
+        Modifiers, RichText, Sense, TextStyle, Ui, Vec2, Window,
     },
 };
 use egui_dock::{DockArea, Node, Tree};
 use egui_extras::{Column, TableBuilder};
-use object::{
-    coff::CoffHeader,
-    pe,
-    pe::{ImageDosHeader, ImageNtHeaders64},
-    read::pe::{ImageNtHeaders, ImageOptionalHeader},
-    LittleEndian,
-};
+use object::{coff::CoffHeader, pe, read::pe::ImageNtHeaders, LittleEndian, Object};
+use object::read::pe::PeFile64;
 use windows::Win32::{
     Foundation::{CloseHandle, FALSE, HMODULE, MAX_PATH},
     System::{
@@ -41,10 +36,7 @@ mod util;
 pub fn main() -> eframe::Result<()> {
     eframe::run_native(
         "Amalgam",
-        eframe::NativeOptions {
-            icon_data: None,
-            ..Default::default()
-        },
+        eframe::NativeOptions::default(),
         Box::new(|_| Box::new(App::default())),
     )
 }
@@ -91,35 +83,19 @@ impl App {
     }
 
     fn open_address_view(&mut self, address: u64) {
-        let data = self.project.as_ref().unwrap().data.as_slice();
-        let dos_header = ImageDosHeader::parse(data).unwrap();
-        let mut nt_header_offset = dos_header.nt_headers_offset().into();
-        let (nt_headers, _data_directories) =
-            ImageNtHeaders64::parse(data, &mut nt_header_offset).unwrap();
-        let file_header = nt_headers.file_header();
-        if file_header.machine.get(LittleEndian) != pe::IMAGE_FILE_MACHINE_I386
-            && file_header.machine.get(LittleEndian) != pe::IMAGE_FILE_MACHINE_AMD64
-        {
-            return;
-        }
-        let optional_header = nt_headers.optional_header();
-        let sections = file_header.sections(data, nt_header_offset).unwrap();
-        let relative_address = (address - optional_header.image_base()) as u32;
-        let Some(section) = sections.section_containing(relative_address) else {
+        let file = PeFile64::parse(self.project.as_ref().unwrap().data.as_slice(), self.project.as_ref().unwrap().va_space).unwrap();
+        let relative_address = (address - file.relative_address_base()) as u32;
+        let Some(section) = file.section_table().section_containing(relative_address) else {
             return;
         };
-        let Some((section_data_offset, section_data_length)) = section.pe_file_range_at(relative_address) else {
+        let Some((section_data_offset, section_data_length)) = file.section_table().pe_range_at(relative_address) else {
             return;
         };
         let section_characteristics = section.characteristics.get(LittleEndian);
         if section_characteristics & (pe::IMAGE_SCN_CNT_CODE | pe::IMAGE_SCN_MEM_EXECUTE) != 0 {
             // open assembly tab as section is executable
             self.open_view(Box::new(AssemblyTab::new(
-                if file_header.machine.get(LittleEndian) == pe::IMAGE_FILE_MACHINE_I386 {
-                    32
-                } else {
-                    64
-                },
+                64,
                 address,
                 section_data_offset as usize,
                 section_data_length as usize,
@@ -137,7 +113,6 @@ impl App {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &Context, frame: &mut eframe::Frame) {
-        let no_focus = ctx.memory(|memory| memory.focus().is_none());
         if let Some(project) = &mut self.project {
             CentralPanel::default()
                 .frame(Frame::none())
@@ -162,11 +137,9 @@ impl eframe::App for App {
                             project.label_window = None;
                         }
                     }
-                    if no_focus
-                        && ui.input_mut(|input| {
-                            input.consume_shortcut(&KeyboardShortcut::new(Modifiers::NONE, Key::G))
-                        })
-                        && project.go_to_address_window.is_none()
+                    if ui.input_mut(|input| {
+                        input.consume_shortcut(&KeyboardShortcut::new(Modifiers::CTRL, Key::G))
+                    }) && project.go_to_address_window.is_none()
                     {
                         project.go_to_address_window = Some(Default::default())
                     }
@@ -190,7 +163,7 @@ impl eframe::App for App {
                         let Some(path) = rfd::FileDialog::new().pick_file() else {
                             todo!()
                         };
-                        self.project = Some(Project::new(path));
+                        self.project = Some(Project::open_path(path).unwrap());
                         self.open_label_view();
                     }
                     if ui
@@ -208,7 +181,9 @@ impl eframe::App for App {
                 });
                 // render "attach" window
                 if let Some(attach_window) = &mut self.attach_window {
-                    if let Some(process) = attach_window.ui(ui) {
+                    if let Some(pid) = attach_window.ui(ui) {
+                        self.project = Some(Project::open_pid(pid).unwrap());
+                        self.open_label_view();
                     } else if !attach_window.open {
                         self.attach_window = None;
                     }
@@ -216,24 +191,17 @@ impl eframe::App for App {
             });
         }
         // toggle fullscreen (F11)
-        if no_focus
-            && ctx.input_mut(|input| {
-                input.consume_shortcut(&KeyboardShortcut::new(Modifiers::NONE, Key::F11))
-            })
-        {
+        if ctx.input_mut(|input| {
+            input.consume_shortcut(&KeyboardShortcut::new(Modifiers::NONE, Key::F11))
+        }) {
             frame.set_fullscreen(!frame.info().window_info.fullscreen)
         }
     }
 }
 
-struct Process {
-    id: u32,
-    name: String,
-}
-
 struct AttachWindow {
     open: bool,
-    processes: Vec<Process>,
+    processes: Vec<(u32, String)>,
 }
 
 impl AttachWindow {
@@ -276,15 +244,15 @@ impl AttachWindow {
                     {
                         let mut module_base_name = [0; MAX_PATH as usize];
                         GetModuleBaseNameW(process, module, &mut module_base_name);
-                        self.processes.push(Process {
-                            id: pid,
-                            name: OsString::from_wide(
+                        self.processes.push((
+                            pid,
+                            OsString::from_wide(
                                 module_base_name.split(|&elem| elem == 0).next().unwrap(),
                             )
                             .into_string()
                             .ok()
                             .unwrap(),
-                        });
+                        ));
                     }
                     CloseHandle(process);
                 }
@@ -292,11 +260,10 @@ impl AttachWindow {
         }
     }
 
-    fn ui(&mut self, ui: &mut Ui) -> Option<()> {
+    fn ui(&mut self, ui: &mut Ui) -> Option<u32> {
         let mut process = None;
         Window::new("Attach")
             .open(&mut self.open)
-            .resizable(false)
             .collapsible(false)
             .show(ui.ctx(), |ui| {
                 // render table
@@ -306,32 +273,50 @@ impl AttachWindow {
                     .max_scroll_height(f32::INFINITY)
                     .column(Column::auto())
                     .column(Column::remainder())
+                    .header(row_height, |mut row| {
+                        row.col(|ui| {
+                            ui.monospace("PID");
+                        });
+                        row.col(|ui| {
+                            ui.monospace("Name");
+                        });
+                    })
                     .body(|mut body| {
-                        for process in &self.processes {
+                        for (pid, name) in &self.processes {
                             body.row(row_height, |mut row| {
                                 // render pid column
                                 row.col(|ui| {
                                     ui.add(
                                         egui::Label::new(
-                                            RichText::from(format!("{}", process.id)).monospace(),
+                                            RichText::from(format!("{}", pid)).monospace(),
                                         )
                                         .wrap(false),
                                     );
                                 });
                                 // render name column
                                 row.col(|ui| {
-                                    ui.add(
-                                        egui::Label::new(
-                                            RichText::from(format!("{}", process.name)).monospace(),
+                                    if ui
+                                        .add(
+                                            egui::Label::new(RichText::from(name).monospace())
+                                                .wrap(false)
+                                                .sense(Sense::click()),
                                         )
-                                        .wrap(false),
-                                    );
+                                        .clicked()
+                                    {
+                                        process = Some(*pid);
+                                    }
                                 });
                             });
                         }
                     });
             });
-        if process.is_some() {
+        if ui.input_mut(|input| {
+            input.consume_shortcut(&KeyboardShortcut::new(Modifiers::NONE, Key::F5))
+        }) {
+            self.refresh();
+        }
+        if process.is_some()
+        {
             self.open = false;
         }
         process
@@ -346,6 +331,7 @@ pub struct GoToAddressWindow {
 impl GoToAddressWindow {
     fn ui(&mut self, ui: &mut Ui) -> Option<u64> {
         let mut address = None;
+        let mut close = false;
         Window::new("Go To Address")
             .open(&mut self.open)
             .resizable(false)
@@ -362,9 +348,12 @@ impl GoToAddressWindow {
                             address = Some(address_);
                         }
                     }
+                    if ui.button("Cancel").clicked() {
+                        close = true;
+                    }
                 })
             });
-        if address.is_some() {
+        if address.is_some() || close {
             self.open = false;
         }
         address

@@ -2,11 +2,9 @@ use std::collections::HashSet;
 
 use eframe::{
     egui::{
-        text::{LayoutJob, LayoutSection},
-        Align, Color32, FontId, Label, Layout, RichText, Sense, Style, TextFormat, TextStyle, Ui,
-        Vec2,
+        text::LayoutJob, Align, Color32, FontId, Label, RichText, Sense, Style, TextStyle, Ui, Vec2,
     },
-    epaint::text::{layout, TextWrapping},
+    epaint::text::TextWrapping,
 };
 use egui_extras::{Column, TableBuilder};
 use iced_x86::{Decoder, DecoderOptions, Formatter, FormatterTextKind, NasmFormatter};
