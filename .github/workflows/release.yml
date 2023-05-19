@@ -23,8 +23,8 @@ jobs:
     strategy:
       matrix:
         include:
-#         - os: ubuntu-latest
-#           artifact_name: amalgam
+          #- os: ubuntu-latest
+          #  artifact_name: amalgam
           - os: windows-latest
             artifact_name: amalgam.exe
     runs-on: ${{ matrix.os }}

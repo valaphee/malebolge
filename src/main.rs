@@ -14,8 +14,6 @@ use eframe::{
 };
 use egui_dock::{DockArea, Node, Tree};
 use egui_extras::{Column, TableBuilder};
-use object::{coff::CoffHeader, pe, read::pe::ImageNtHeaders, LittleEndian, Object};
-use object::read::pe::PeFile64;
 use windows::Win32::{
     Foundation::{CloseHandle, FALSE, HMODULE, MAX_PATH},
     System::{
@@ -25,7 +23,7 @@ use windows::Win32::{
 };
 
 use crate::{
-    project::{Label, LabelType, Project},
+    project::{Label, LabelType, Project, SectionType},
     tab::{assembly::AssemblyTab, label::LabelTab, raw::RawView, Tab, TabViewer},
 };
 
@@ -83,30 +81,25 @@ impl App {
     }
 
     fn open_address_view(&mut self, address: u64) {
-        let file = PeFile64::parse(self.project.as_ref().unwrap().data.as_slice(), self.project.as_ref().unwrap().va_space).unwrap();
-        let relative_address = (address - file.relative_address_base()) as u32;
-        let Some(section) = file.section_table().section_containing(relative_address) else {
+        let Some(section) = self.project.as_ref().unwrap().section_containing(address) else {
             return;
         };
-        let Some((section_data_offset, section_data_length)) = file.section_table().pe_range_at(relative_address) else {
-            return;
-        };
-        let section_characteristics = section.characteristics.get(LittleEndian);
-        if section_characteristics & (pe::IMAGE_SCN_CNT_CODE | pe::IMAGE_SCN_MEM_EXECUTE) != 0 {
-            // open assembly tab as section is executable
-            self.open_view(Box::new(AssemblyTab::new(
-                64,
-                address,
-                section_data_offset as usize,
-                section_data_length as usize,
-            )));
-        } else {
-            // open raw tab as section contains arbitrary data
-            self.open_view(Box::new(RawView::new(
-                address,
-                section_data_offset as usize,
-                section_data_length as usize,
-            )));
+        match section.type_ {
+            SectionType::Raw => {
+                self.open_view(Box::new(RawView::new(
+                    address,
+                    section.data_offset,
+                    section.data_length,
+                )));
+            }
+            SectionType::Assembly => {
+                self.open_view(Box::new(AssemblyTab::new(
+                    64,
+                    address,
+                    section.data_offset,
+                    section.data_length,
+                )));
+            }
         }
     }
 }
@@ -163,7 +156,7 @@ impl eframe::App for App {
                         let Some(path) = rfd::FileDialog::new().pick_file() else {
                             todo!()
                         };
-                        self.project = Some(Project::open_path(path).unwrap());
+                        self.project = Some(Project::from_path(path).unwrap());
                         self.open_label_view();
                     }
                     if ui
@@ -182,7 +175,7 @@ impl eframe::App for App {
                 // render "attach" window
                 if let Some(attach_window) = &mut self.attach_window {
                     if let Some(pid) = attach_window.ui(ui) {
-                        self.project = Some(Project::open_pid(pid).unwrap());
+                        self.project = Some(Project::from_pid(pid).unwrap());
                         self.open_label_view();
                     } else if !attach_window.open {
                         self.attach_window = None;
@@ -219,43 +212,39 @@ impl AttachWindow {
         unsafe {
             let mut pids = [0; 4096];
             let mut pids_length = 0;
-            if EnumProcesses(
+            EnumProcesses(
                 pids.as_mut_ptr(),
                 std::mem::size_of_val(&pids) as u32,
                 &mut pids_length,
             )
-            .into()
-            {
-                for &pid in &pids[..pids_length as usize / std::mem::size_of::<u32>()] {
-                    let Ok(process) = OpenProcess(PROCESS_VM_READ | PROCESS_QUERY_INFORMATION, FALSE, pid) else {
-                        continue;
-                    };
-                    if process.is_invalid() {
-                        continue;
-                    }
-                    let mut module = HMODULE::default();
-                    if EnumProcessModules(
-                        process,
-                        &mut module,
-                        std::mem::size_of_val(&module) as u32,
-                        &mut 0,
-                    )
-                    .into()
-                    {
-                        let mut module_base_name = [0; MAX_PATH as usize];
-                        GetModuleBaseNameW(process, module, &mut module_base_name);
-                        self.processes.push((
-                            pid,
-                            OsString::from_wide(
-                                module_base_name.split(|&elem| elem == 0).next().unwrap(),
-                            )
-                            .into_string()
-                            .ok()
-                            .unwrap(),
-                        ));
-                    }
-                    CloseHandle(process);
+            .ok()
+            .unwrap();
+            for &pid in &pids[..pids_length as usize / std::mem::size_of::<u32>()] {
+                let Ok(process) = OpenProcess(PROCESS_VM_READ | PROCESS_QUERY_INFORMATION, FALSE, pid) else {
+                    continue;
+                };
+                let mut module = HMODULE::default();
+                if EnumProcessModules(
+                    process,
+                    &mut module,
+                    std::mem::size_of_val(&module) as u32,
+                    &mut 0,
+                )
+                .ok()
+                .is_err()
+                {
+                    continue;
                 }
+                let mut module_base_name = [0; MAX_PATH as usize];
+                GetModuleBaseNameW(process, module, &mut module_base_name);
+                self.processes.push((
+                    pid,
+                    OsString::from_wide(module_base_name.split(|&elem| elem == 0).next().unwrap())
+                        .into_string()
+                        .ok()
+                        .unwrap(),
+                ));
+                CloseHandle(process);
             }
         }
     }
@@ -315,8 +304,7 @@ impl AttachWindow {
         }) {
             self.refresh();
         }
-        if process.is_some()
-        {
+        if process.is_some() {
             self.open = false;
         }
         process
