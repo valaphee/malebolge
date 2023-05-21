@@ -15,14 +15,18 @@ egui_dock = "0.5.0"
 egui_extras = "0.21.0"
 iced-x86 = "1.18.0"
 object = { version = "0.31.1", features = ["all"] }
+pollster = "0.3.0"
 rfd = "0.11.3"
 thiserror = "1.0.40"
+tokio = { version = "1.28.0", features = ["sync"] }
 
 [dependencies.windows]
 version = "0.48.0"
 features = [
     "Win32_Foundation",
     "Win32_System_Diagnostics_Debug",
+    "Win32_System_Kernel",
+    "Win32_System_Memory",
     "Win32_System_ProcessStatus",
     "Win32_System_Threading"
 ]

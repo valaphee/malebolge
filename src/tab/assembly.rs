@@ -12,27 +12,25 @@ use iced_x86::{Decoder, DecoderOptions, Formatter, FormatterTextKind, NasmFormat
 use crate::{project::Project, tab::Tab, util::warden, LabelWindow};
 
 pub struct AssemblyTab {
-    bitness: u32,
     address: u64,
     data_offset: usize,
     data_length: usize,
     // runtime
     last_address: u64,
     addresses: HashSet<u64>,
-    instructions: Vec<Instruction>,
+    rows: Vec<Row>,
     go_to_row: Option<usize>,
 }
 
 impl AssemblyTab {
-    pub fn new(bitness: u32, address: u64, data_offset: usize, data_length: usize) -> Self {
+    pub fn new(address: u64, data_offset: usize, data_length: usize) -> Self {
         Self {
-            bitness,
             address,
             data_offset,
             data_length,
             last_address: address,
             addresses: Default::default(),
-            instructions: Default::default(),
+            rows: Default::default(),
             go_to_row: None,
         }
     }
@@ -44,7 +42,6 @@ impl Tab for AssemblyTab {
     }
 
     fn ui(&mut self, project: &mut Project, ui: &mut Ui) {
-        // render table
         let row_height = ui.text_style_height(&TextStyle::Monospace);
         let style = ui.style().clone();
         let mut table_builder = TableBuilder::new(ui)
@@ -60,14 +57,13 @@ impl Tab for AssemblyTab {
             table_builder
         };
         table_builder.body(|body| {
-            // render rows
             body.rows(
                 row_height,
-                self.instructions.len() + 100,
+                self.rows.len() + 100,
                 |index, mut row| {
                     // cache decoded instructions, rows will always be loaded in order, therefore
                     // its save to use a Vec
-                    let instruction = if let Some(instruction) = self.instructions.get(index) {
+                    let instruction = if let Some(instruction) = self.rows.get(index) {
                         instruction
                     } else {
                         // decode instruction
@@ -75,26 +71,25 @@ impl Tab for AssemblyTab {
                             &project.data[self.data_offset..self.data_offset + self.data_length];
                         let address = self.last_address;
                         let position = (address - self.address) as usize;
-                        let mut decoder =
-                            Decoder::with_ip(self.bitness, data, address, DecoderOptions::NONE);
+                        let mut decoder = Decoder::with_ip(64, data, address, DecoderOptions::NONE);
                         decoder.set_position(position).unwrap();
-                        let raw_instruction = warden::CfoPatcher::new(&mut decoder).next().unwrap();
+                        let instruction = warden::CfoPatcher::new(&mut decoder).next().unwrap()/*decoder.decode()*/;
                         self.last_address += (decoder.position() - position) as u64;
                         // format instruction
-                        let mut instruction = Instruction::new(
-                            raw_instruction.ip(),
-                            data[position..position + raw_instruction.len()]
+                        let mut row_ = Row::new(
+                            instruction.ip(),
+                            data[position..position + instruction.len()]
                                 .iter()
                                 .map(|&elem| format!("{:02X}", elem))
                                 .collect::<Vec<_>>()
                                 .join(" "),
                         );
-                        NasmFormatter::new().format(&raw_instruction, &mut instruction);
-                        instruction.post_format(&style);
-                        self.addresses.insert(instruction.address);
-                        self.instructions.push(instruction);
+                        NasmFormatter::new().format(&instruction, &mut row_);
+                        row_.post_format(&style);
+                        self.addresses.insert(row_.address);
+                        self.rows.push(row_);
                         // validate addresses
-                        for instruction in &mut self.instructions {
+                        for instruction in &mut self.rows {
                             for (text, address) in &mut instruction.instruction {
                                 let Some(address) = address else {
                                     continue;
@@ -107,11 +102,10 @@ impl Tab for AssemblyTab {
                                 }
                             }
                         }
-                        &self.instructions[index]
+                        &self.rows[index]
                     };
-                    // get label
                     let label = project.labels.get(&instruction.address);
-                    // render address column
+                    // address
                     row.col(|ui| {
                         ui.add(
                             Label::new(
@@ -148,11 +142,11 @@ impl Tab for AssemblyTab {
                             }
                         });
                     });
-                    // render raw column
+                    // bytes
                     row.col(|ui| {
-                        ui.label(instruction.raw.clone());
+                        ui.label(instruction.bytes.clone());
                     });
-                    // render instruction column
+                    // instruction
                     row.col(|ui| {
                         ui.horizontal(|ui| {
                             ui.spacing_mut().item_spacing = Vec2::ZERO;
@@ -163,7 +157,7 @@ impl Tab for AssemblyTab {
                                         .clicked()
                                     {
                                         if let Some(row) =
-                                            self.instructions.iter().enumerate().find_map(
+                                            self.rows.iter().enumerate().find_map(
                                                 |(row, instruction)| {
                                                     if instruction.address == address {
                                                         Some(row)
@@ -184,7 +178,7 @@ impl Tab for AssemblyTab {
                             }
                         });
                     });
-                    // render comment column
+                    // comment column
                     row.col(|ui| {
                         if let Some(label) = label {
                             let mut layout_job = LayoutJob::simple_singleline(
@@ -205,17 +199,17 @@ impl Tab for AssemblyTab {
     }
 }
 
-struct Instruction {
+struct Row {
     address: u64,
-    raw: LayoutJob,
+    bytes: LayoutJob,
     instruction: Vec<(LayoutJob, Option<u64>)>,
 }
 
-impl Instruction {
+impl Row {
     fn new(address: u64, raw: String) -> Self {
         Self {
             address,
-            raw: LayoutJob::simple_singleline(
+            bytes: LayoutJob::simple_singleline(
                 raw.clone(),
                 FontId::default(),
                 Color32::TEMPORARY_COLOR,
@@ -225,12 +219,12 @@ impl Instruction {
     }
 
     fn post_format(&mut self, style: &Style) {
-        let text_format = &mut self.raw.sections.first_mut().unwrap().format;
+        let text_format = &mut self.bytes.sections.first_mut().unwrap().format;
         text_format.font_id = TextStyle::Monospace.resolve(style);
         if text_format.color == Color32::TEMPORARY_COLOR {
             text_format.color = style.visuals.text_color()
         }
-        self.raw.wrap = TextWrapping {
+        self.bytes.wrap = TextWrapping {
             max_rows: 1,
             ..Default::default()
         };
@@ -248,7 +242,7 @@ impl Instruction {
     }
 }
 
-impl iced_x86::FormatterOutput for Instruction {
+impl iced_x86::FormatterOutput for Row {
     fn write(&mut self, text: &str, kind: FormatterTextKind) {
         self.instruction.push(match kind {
             FormatterTextKind::LabelAddress | FormatterTextKind::FunctionAddress => (

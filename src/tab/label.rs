@@ -9,6 +9,7 @@ use crate::{
     project::{LabelType, Project},
     tab::Tab,
 };
+use crate::debug::{DebugEvent, DebugStatus};
 
 #[derive(Default)]
 pub struct LabelTab;
@@ -19,7 +20,6 @@ impl Tab for LabelTab {
     }
 
     fn ui(&mut self, project: &mut Project, ui: &mut Ui) {
-        // render table
         let row_height = ui.text_style_height(&TextStyle::Monospace);
         TableBuilder::new(ui)
             .striped(true)
@@ -40,10 +40,9 @@ impl Tab for LabelTab {
             })
             .body(|mut body| {
                 let mut remove_label = None;
-                // render rows
                 for (label_address, label) in project.labels.iter() {
                     body.row(row_height, |mut row| {
-                        // render address column
+                        // address
                         row.col(|ui| {
                             if ui
                                 .add(
@@ -80,7 +79,7 @@ impl Tab for LabelTab {
                                 project.go_to_address = Some(*label_address)
                             }
                         });
-                        // render type column
+                        // type
                         row.col(|ui| {
                             ui.add(
                                 egui::Label::new(
@@ -95,7 +94,7 @@ impl Tab for LabelTab {
                                 .wrap(false),
                             );
                         });
-                        // render name column
+                        // name
                         row.col(|ui| {
                             ui.add(
                                 egui::Label::new(RichText::from(&label.name).monospace())
@@ -109,8 +108,6 @@ impl Tab for LabelTab {
                     project.labels.remove(&address);
                 }
             });
-
-        // render context menu
         ui.interact(
             ui.available_rect_before_wrap(),
             ui.id().with("context_menu"),

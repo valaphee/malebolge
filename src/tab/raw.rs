@@ -25,7 +25,6 @@ impl Tab for RawView {
     }
 
     fn ui(&mut self, project: &mut Project, ui: &mut Ui) {
-        // render table
         let row_height = ui.text_style_height(&TextStyle::Monospace);
         let data = &project.data
             [self.data_offset as usize..(self.data_offset + self.data_length) as usize];
@@ -44,7 +43,6 @@ impl Tab for RawView {
             .body(|body| {
                 let aligned_address = self.address as usize / 16;
                 let aligned_address_offset = self.address as usize % 16;
-                // render rows
                 body.rows(
                     row_height,
                     (data.len() + aligned_address_offset).div_ceil(16),
@@ -55,7 +53,7 @@ impl Tab for RawView {
                             index * 16 - aligned_address_offset
                         }
                             ..(index * 16 + 16 - aligned_address_offset).min(data.len())];
-                        // render cols
+                        // address
                         row.col(|ui| {
                             ui.add(
                                 Label::new(
@@ -68,6 +66,7 @@ impl Tab for RawView {
                                 .wrap(false),
                             );
                         });
+                        // bytes
                         row.col(|ui| {
                             let mut text = data
                                 .iter()
@@ -83,6 +82,7 @@ impl Tab for RawView {
                             }
                             ui.add(Label::new(RichText::from(text).monospace()).wrap(false));
                         });
+                        // ascii
                         row.col(|ui| {
                             let mut text = data
                                 .iter()

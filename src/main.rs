@@ -1,4 +1,5 @@
 #![feature(int_roundings)]
+#![feature(strict_provenance)]
 #![windows_subsystem = "windows"]
 
 extern crate core;
@@ -30,6 +31,7 @@ use crate::{
 mod project;
 mod tab;
 mod util;
+mod debug;
 
 pub fn main() -> eframe::Result<()> {
     eframe::run_native(
@@ -42,6 +44,7 @@ pub fn main() -> eframe::Result<()> {
 #[derive(Default)]
 struct App {
     project: Option<Project>,
+    // runtime
     tree: Tree<Box<dyn Tab>>,
     attach_window: Option<AttachWindow>,
 }
@@ -81,7 +84,7 @@ impl App {
     }
 
     fn open_address_view(&mut self, address: u64) {
-        let Some(section) = self.project.as_ref().unwrap().section_containing(address) else {
+        let Some(section) = self.project.as_ref().unwrap().section(address) else {
             return;
         };
         match section.type_ {
@@ -94,7 +97,6 @@ impl App {
             }
             SectionType::Assembly => {
                 self.open_view(Box::new(AssemblyTab::new(
-                    64,
                     address,
                     section.data_offset,
                     section.data_length,
@@ -110,9 +112,7 @@ impl eframe::App for App {
             CentralPanel::default()
                 .frame(Frame::none())
                 .show(ctx, |ui| {
-                    // render dock area
                     DockArea::new(&mut self.tree).show_inside(ui, &mut TabViewer { project });
-                    // render "go to address" window
                     if let Some(go_to_address_window) = &mut project.go_to_address_window {
                         if let Some(address) = go_to_address_window.ui(ui) {
                             project.go_to_address_window = None;
@@ -121,7 +121,6 @@ impl eframe::App for App {
                             project.go_to_address_window = None;
                         }
                     }
-                    // render "label" window
                     if let Some(label_window) = &mut project.label_window {
                         if let Some(label) = label_window.ui(ui) {
                             project.label_window = None;
@@ -137,7 +136,6 @@ impl eframe::App for App {
                         project.go_to_address_window = Some(Default::default())
                     }
                 });
-            // go to address
             if let Some(address) = project.go_to_address {
                 project.go_to_address = None;
                 self.open_address_view(address);
@@ -172,10 +170,9 @@ impl eframe::App for App {
                         frame.close()
                     }
                 });
-                // render "attach" window
                 if let Some(attach_window) = &mut self.attach_window {
                     if let Some(pid) = attach_window.ui(ui) {
-                        self.project = Some(Project::from_pid(pid).unwrap());
+                        self.project = Some(Project::from_pid(pid, ctx.clone()).unwrap());
                         self.open_label_view();
                     } else if !attach_window.open {
                         self.attach_window = None;
@@ -183,7 +180,6 @@ impl eframe::App for App {
                 }
             });
         }
-        // toggle fullscreen (F11)
         if ctx.input_mut(|input| {
             input.consume_shortcut(&KeyboardShortcut::new(Modifiers::NONE, Key::F11))
         }) {
@@ -247,6 +243,7 @@ impl AttachWindow {
                 CloseHandle(process);
             }
         }
+        self.processes.sort_by_key(|(_, name)| name.to_lowercase());
     }
 
     fn ui(&mut self, ui: &mut Ui) -> Option<u32> {
@@ -255,7 +252,6 @@ impl AttachWindow {
             .open(&mut self.open)
             .collapsible(false)
             .show(ui.ctx(), |ui| {
-                // render table
                 let row_height = ui.text_style_height(&TextStyle::Monospace);
                 TableBuilder::new(ui)
                     .min_scrolled_height(0.0)
@@ -273,7 +269,7 @@ impl AttachWindow {
                     .body(|mut body| {
                         for (pid, name) in &self.processes {
                             body.row(row_height, |mut row| {
-                                // render pid column
+                                // pid
                                 row.col(|ui| {
                                     ui.add(
                                         egui::Label::new(
@@ -282,7 +278,7 @@ impl AttachWindow {
                                         .wrap(false),
                                     );
                                 });
-                                // render name column
+                                // name
                                 row.col(|ui| {
                                     if ui
                                         .add(

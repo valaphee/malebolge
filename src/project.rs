@@ -1,6 +1,7 @@
 use std::{collections::BTreeMap, path::Path};
 
 use byteorder::{ReadBytesExt, LE};
+use eframe::egui;
 use object::{
     pe,
     pe::ImageTlsDirectory64,
@@ -11,13 +12,19 @@ use thiserror::Error;
 use windows::Win32::{
     Foundation::{CloseHandle, FALSE, HMODULE},
     System::{
-        Diagnostics::Debug::ReadProcessMemory,
+        Diagnostics::Debug::{
+            ReadProcessMemory,
+        },
         ProcessStatus::{EnumProcessModules, GetModuleInformation, MODULEINFO},
-        Threading::{OpenProcess, PROCESS_QUERY_INFORMATION, PROCESS_VM_READ},
+        Threading::{
+            OpenProcess, PROCESS_QUERY_INFORMATION,
+            PROCESS_VM_READ,
+        },
     },
 };
 
 use crate::{GoToAddressWindow, LabelWindow};
+use crate::debug::Debugger;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -33,6 +40,7 @@ pub struct Project {
     pub va_space: bool,
     pub data: Vec<u8>,
     pub labels: BTreeMap<u64, Label>,
+    pub debugger: Option<Debugger>,
     // runtime
     pub go_to_address: Option<u64>,
     pub go_to_address_window: Option<GoToAddressWindow>,
@@ -46,6 +54,7 @@ impl Project {
             va_space: false,
             data,
             labels: Default::default(),
+            debugger: None,
             go_to_address: None,
             go_to_address_window: None,
             label_window: None,
@@ -54,9 +63,13 @@ impl Project {
         Ok(project)
     }
 
-    pub fn from_pid(pid: u32) -> Result<Self> {
+    pub fn from_pid(pid: u32, ctx: egui::Context) -> Result<Self> {
         let data = unsafe {
-            let process = OpenProcess(PROCESS_VM_READ | PROCESS_QUERY_INFORMATION, FALSE, pid)?;
+            let process = OpenProcess(
+                PROCESS_VM_READ | PROCESS_QUERY_INFORMATION,
+                FALSE,
+                pid,
+            )?;
             let mut module = HMODULE::default();
             EnumProcessModules(
                 process,
@@ -89,6 +102,7 @@ impl Project {
             va_space: true,
             data,
             labels: Default::default(),
+            debugger: None,
             go_to_address: None,
             go_to_address_window: None,
             label_window: None,
@@ -152,7 +166,7 @@ impl Project {
         }
     }
 
-    pub fn section_containing(&self, address: u64) -> Option<Section> {
+    pub fn section(&self, address: u64) -> Option<Section> {
         let file = PeFile64::parse(self.data.as_slice(), self.va_space).unwrap();
         let relative_address = (address - file.relative_address_base()) as u32;
         let Some(section) = file.section_table().section_containing(relative_address) else {
