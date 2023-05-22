@@ -1,33 +1,25 @@
 use eframe::egui::{Label, RichText, TextStyle, Ui};
 use egui_extras::{Column, TableBuilder};
 
-use crate::{view::View, Viewer};
+use crate::client::{AppContext, AppView};
 
 pub struct RawView {
     address: u64,
-    data_offset: usize,
-    data_length: usize,
 }
 
 impl RawView {
-    pub fn new(address: u64, data_offset: usize, data_length: usize) -> Self {
-        Self {
-            address,
-            data_offset,
-            data_length,
-        }
+    pub fn new(address: u64) -> Self {
+        Self { address }
     }
 }
 
-impl View for RawView {
+impl AppView for RawView {
     fn title(&self) -> String {
         format!("Raw ({:016X})", self.address)
     }
 
-    fn ui(&mut self, project: &mut Viewer, ui: &mut Ui) {
+    fn ui(&mut self, viewer: &mut AppContext, ui: &mut Ui) {
         let row_height = ui.text_style_height(&TextStyle::Monospace);
-        let data = &project.data
-            [self.data_offset as usize..(self.data_offset + self.data_length) as usize];
         TableBuilder::new(ui)
             .min_scrolled_height(0.0)
             .max_scroll_height(f32::INFINITY)
@@ -41,6 +33,9 @@ impl View for RawView {
                 row.col(|_ui| {});
             })
             .body(|body| {
+                let section = viewer.project.section(self.address).unwrap();
+                let data = &viewer.project.data[section.data_offset as usize
+                    ..(section.data_offset + section.data_length) as usize];
                 let aligned_address = self.address as usize / 16;
                 let aligned_address_offset = self.address as usize % 16;
                 body.rows(
@@ -53,7 +48,8 @@ impl View for RawView {
                             index * 16 - aligned_address_offset
                         }
                             ..(index * 16 + 16 - aligned_address_offset).min(data.len())];
-                        // address
+
+                        // address column
                         row.col(|ui| {
                             ui.add(
                                 Label::new(
@@ -61,12 +57,13 @@ impl View for RawView {
                                         "{:016X}",
                                         (index + aligned_address) * 16
                                     ))
-                                    .monospace(),
+                                        .monospace(),
                                 )
-                                .wrap(false),
+                                    .wrap(false),
                             );
                         });
-                        // bytes
+
+                        // bytes column
                         row.col(|ui| {
                             let mut text = data
                                 .iter()
@@ -82,7 +79,8 @@ impl View for RawView {
                             }
                             ui.add(Label::new(RichText::from(text).monospace()).wrap(false));
                         });
-                        // ascii
+
+                        // ascii column
                         row.col(|ui| {
                             let mut text = data
                                 .iter()
