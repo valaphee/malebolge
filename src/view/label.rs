@@ -5,21 +5,17 @@ use eframe::{
 use egui_dock::egui::Sense;
 use egui_extras::{Column, TableBuilder};
 
-use crate::{
-    project::{LabelType, Project},
-    tab::Tab,
-};
-use crate::debug::{DebugEvent, DebugStatus};
+use crate::{LabelType, view::View, Viewer};
 
 #[derive(Default)]
-pub struct LabelTab;
+pub struct LabelView;
 
-impl Tab for LabelTab {
+impl View for LabelView {
     fn title(&self) -> String {
         "Labels".into()
     }
 
-    fn ui(&mut self, project: &mut Project, ui: &mut Ui) {
+    fn ui(&mut self, project: &mut Viewer, ui: &mut Ui) {
         let row_height = ui.text_style_height(&TextStyle::Monospace);
         TableBuilder::new(ui)
             .striped(true)

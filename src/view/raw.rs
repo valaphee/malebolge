@@ -1,7 +1,7 @@
 use eframe::egui::{Label, RichText, TextStyle, Ui};
 use egui_extras::{Column, TableBuilder};
 
-use crate::{project::Project, tab::Tab};
+use crate::{view::View, Viewer};
 
 pub struct RawView {
     address: u64,
@@ -19,12 +19,12 @@ impl RawView {
     }
 }
 
-impl Tab for RawView {
+impl View for RawView {
     fn title(&self) -> String {
         format!("Raw ({:016X})", self.address)
     }
 
-    fn ui(&mut self, project: &mut Project, ui: &mut Ui) {
+    fn ui(&mut self, project: &mut Viewer, ui: &mut Ui) {
         let row_height = ui.text_style_height(&TextStyle::Monospace);
         let data = &project.data
             [self.data_offset as usize..(self.data_offset + self.data_length) as usize];

@@ -9,9 +9,9 @@ use eframe::{
 use egui_extras::{Column, TableBuilder};
 use iced_x86::{Decoder, DecoderOptions, Formatter, FormatterTextKind, NasmFormatter};
 
-use crate::{project::Project, tab::Tab, util::warden, LabelWindow};
+use crate::{view::View, LabelWindow, Viewer};
 
-pub struct AssemblyTab {
+pub struct AssemblyView {
     address: u64,
     data_offset: usize,
     data_length: usize,
@@ -22,7 +22,7 @@ pub struct AssemblyTab {
     go_to_row: Option<usize>,
 }
 
-impl AssemblyTab {
+impl AssemblyView {
     pub fn new(address: u64, data_offset: usize, data_length: usize) -> Self {
         Self {
             address,
@@ -36,12 +36,12 @@ impl AssemblyTab {
     }
 }
 
-impl Tab for AssemblyTab {
+impl View for AssemblyView {
     fn title(&self) -> String {
         format!("Assembly ({:016X})", self.address).into()
     }
 
-    fn ui(&mut self, project: &mut Project, ui: &mut Ui) {
+    fn ui(&mut self, project: &mut Viewer, ui: &mut Ui) {
         let row_height = ui.text_style_height(&TextStyle::Monospace);
         let style = ui.style().clone();
         let mut table_builder = TableBuilder::new(ui)
@@ -73,7 +73,7 @@ impl Tab for AssemblyTab {
                         let position = (address - self.address) as usize;
                         let mut decoder = Decoder::with_ip(64, data, address, DecoderOptions::NONE);
                         decoder.set_position(position).unwrap();
-                        let instruction = warden::CfoPatcher::new(&mut decoder).next().unwrap()/*decoder.decode()*/;
+                        let instruction = decoder.decode();
                         self.last_address += (decoder.position() - position) as u64;
                         // format instruction
                         let mut row_ = Row::new(

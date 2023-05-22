@@ -5,6 +5,9 @@
 extern crate core;
 
 use std::{ffi::OsString, os::windows::prelude::*};
+use std::collections::BTreeMap;
+use std::path::Path;
+use byteorder::{LE, ReadBytesExt};
 
 use eframe::{
     egui,
@@ -13,8 +16,13 @@ use eframe::{
         Modifiers, RichText, Sense, TextStyle, Ui, Vec2, Window,
     },
 };
+use eframe::egui::WidgetText;
 use egui_dock::{DockArea, Node, Tree};
 use egui_extras::{Column, TableBuilder};
+use object::{LittleEndian, Object, ReadRef};
+use object::pe::{IMAGE_DIRECTORY_ENTRY_TLS, IMAGE_SCN_CNT_CODE, IMAGE_SCN_MEM_EXECUTE, ImageTlsDirectory64};
+use object::read::pe::{ExportTarget, ImageNtHeaders, ImageOptionalHeader, PeFile64};
+use thiserror::Error;
 use windows::Win32::{
     Foundation::{CloseHandle, FALSE, HMODULE, MAX_PATH},
     System::{
@@ -22,16 +30,14 @@ use windows::Win32::{
         Threading::{OpenProcess, PROCESS_QUERY_INFORMATION, PROCESS_VM_READ},
     },
 };
+use windows::Win32::System::Diagnostics::Debug::ReadProcessMemory;
+use windows::Win32::System::ProcessStatus::{GetModuleInformation, MODULEINFO};
 
 use crate::{
-    project::{Label, LabelType, Project, SectionType},
-    tab::{assembly::AssemblyTab, label::LabelTab, raw::RawView, Tab, TabViewer},
+    view::{assembly::AssemblyView, label::LabelView, raw::RawView, View},
 };
 
-mod project;
-mod tab;
-mod util;
-mod debug;
+mod view;
 
 pub fn main() -> eframe::Result<()> {
     eframe::run_native(
@@ -43,17 +49,17 @@ pub fn main() -> eframe::Result<()> {
 
 #[derive(Default)]
 struct App {
-    project: Option<Project>,
+    viewer: Option<Viewer>,
     // runtime
-    tree: Tree<Box<dyn Tab>>,
+    views: Tree<Box<dyn View>>,
     attach_window: Option<AttachWindow>,
 }
 
 impl App {
-    fn open_view(&mut self, view: Box<dyn Tab>) {
+    fn open_view(&mut self, view: Box<dyn View>) {
         let title = view.title();
         if let Some((node_index, tab_index)) =
-            self.tree
+            self.views
                 .iter()
                 .enumerate()
                 .find_map(|(node_index, node)| match node {
@@ -71,20 +77,20 @@ impl App {
                     _ => None,
                 })
         {
-            self.tree.set_focused_node(node_index.into());
-            self.tree
+            self.views.set_focused_node(node_index.into());
+            self.views
                 .set_active_tab(node_index.into(), tab_index.into());
         } else {
-            self.tree.push_to_first_leaf(view)
+            self.views.push_to_first_leaf(view)
         }
     }
 
     fn open_label_view(&mut self) {
-        self.open_view(Box::new(LabelTab::default()));
+        self.open_view(Box::new(LabelView::default()));
     }
 
     fn open_address_view(&mut self, address: u64) {
-        let Some(section) = self.project.as_ref().unwrap().section(address) else {
+        let Some(section) = self.viewer.as_ref().unwrap().section(address) else {
             return;
         };
         match section.type_ {
@@ -96,7 +102,7 @@ impl App {
                 )));
             }
             SectionType::Assembly => {
-                self.open_view(Box::new(AssemblyTab::new(
+                self.open_view(Box::new(AssemblyView::new(
                     address,
                     section.data_offset,
                     section.data_length,
@@ -108,11 +114,11 @@ impl App {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &Context, frame: &mut eframe::Frame) {
-        if let Some(project) = &mut self.project {
+        if let Some(project) = &mut self.viewer {
             CentralPanel::default()
                 .frame(Frame::none())
                 .show(ctx, |ui| {
-                    DockArea::new(&mut self.tree).show_inside(ui, &mut TabViewer { project });
+                    DockArea::new(&mut self.views).show_inside(ui, project);
                     if let Some(go_to_address_window) = &mut project.go_to_address_window {
                         if let Some(address) = go_to_address_window.ui(ui) {
                             project.go_to_address_window = None;
@@ -141,8 +147,8 @@ impl eframe::App for App {
                 self.open_address_view(address);
             }
             // close project if tree is empty
-            if self.tree.is_empty() {
-                self.project = None;
+            if self.views.is_empty() {
+                self.viewer = None;
             }
         } else {
             CentralPanel::default().show(ctx, |ui| {
@@ -154,7 +160,7 @@ impl eframe::App for App {
                         let Some(path) = rfd::FileDialog::new().pick_file() else {
                             todo!()
                         };
-                        self.project = Some(Project::from_path(path).unwrap());
+                        self.viewer = Some(Viewer::from_path(path).unwrap());
                         self.open_label_view();
                     }
                     if ui
@@ -172,7 +178,7 @@ impl eframe::App for App {
                 });
                 if let Some(attach_window) = &mut self.attach_window {
                     if let Some(pid) = attach_window.ui(ui) {
-                        self.project = Some(Project::from_pid(pid, ctx.clone()).unwrap());
+                        self.viewer = Some(Viewer::from_pid(pid, ctx.clone()).unwrap());
                         self.open_label_view();
                     } else if !attach_window.open {
                         self.attach_window = None;
@@ -185,6 +191,204 @@ impl eframe::App for App {
         }) {
             frame.set_fullscreen(!frame.info().window_info.fullscreen)
         }
+    }
+}
+
+pub struct Viewer {
+    pub va_space: bool,
+    pub data: Vec<u8>,
+    pub labels: BTreeMap<u64, Label>,
+    // runtime
+    pub go_to_address: Option<u64>,
+    pub go_to_address_window: Option<GoToAddressWindow>,
+    pub label_window: Option<LabelWindow>,
+}
+
+pub type Result<T> = std::result::Result<T, Error>;
+
+#[derive(Error, Debug)]
+pub enum Error {
+    #[error("IO error")]
+    Io(#[from] std::io::Error),
+    #[error("Windows error")]
+    Windows(#[from] windows::core::Error),
+}
+
+impl Viewer {
+    pub fn from_path(path: impl AsRef<Path>) -> Result<Self> {
+        let data = std::fs::read(path)?;
+        let mut project = Self {
+            va_space: false,
+            data,
+            labels: Default::default(),
+            go_to_address: None,
+            go_to_address_window: None,
+            label_window: None,
+        };
+        project.refresh();
+        Ok(project)
+    }
+
+    pub fn from_pid(pid: u32, ctx: egui::Context) -> Result<Self> {
+        let data = unsafe {
+            let process = OpenProcess(
+                PROCESS_VM_READ | PROCESS_QUERY_INFORMATION,
+                FALSE,
+                pid,
+            )?;
+            let mut module = HMODULE::default();
+            EnumProcessModules(
+                process,
+                &mut module,
+                std::mem::size_of_val(&module) as u32,
+                &mut 0,
+            )
+                .ok()?;
+            let mut module_info = MODULEINFO::default();
+            GetModuleInformation(
+                process,
+                module,
+                &mut module_info,
+                std::mem::size_of_val(&module_info) as u32,
+            )
+                .ok()?;
+            let mut data = vec![0; module_info.SizeOfImage as usize];
+            ReadProcessMemory(
+                process,
+                module_info.lpBaseOfDll,
+                data.as_mut_ptr() as *mut std::ffi::c_void,
+                data.len(),
+                None,
+            )
+                .ok()?;
+            CloseHandle(process);
+            data
+        };
+        let mut project = Self {
+            va_space: true,
+            data,
+            labels: Default::default(),
+            go_to_address: None,
+            go_to_address_window: None,
+            label_window: None,
+        };
+        project.refresh();
+        Ok(project)
+    }
+
+    pub fn refresh(&mut self) {
+        let file = PeFile64::parse(self.data.as_slice(), self.va_space).unwrap();
+        if file.nt_headers().optional_header().address_of_entry_point() != 0 {
+            self.labels.insert(
+                file.nt_headers().optional_header().address_of_entry_point() as u64
+                    + file.relative_address_base(),
+                Label {
+                    type_: LabelType::EntryPoint,
+                    name: "Entry point".to_string(),
+                },
+            );
+        }
+        if let Some(export_table) = file.export_table().unwrap() {
+            for export in export_table.exports().unwrap() {
+                match export.target {
+                    ExportTarget::Address(relative_address) => {
+                        self.labels.insert(
+                            relative_address as u64 + file.relative_address_base(),
+                            Label {
+                                type_: LabelType::Export,
+                                name: String::from_utf8_lossy(export.name.unwrap()).to_string(),
+                            },
+                        );
+                    }
+                    _ => {}
+                }
+            }
+        }
+        if let Some(directory) = file.data_directory(IMAGE_DIRECTORY_ENTRY_TLS) {
+            if let Ok(directory_data) = directory.data(file.data(), &file.section_table()) {
+                if let Ok(tls_directory) = directory_data.read_at::<ImageTlsDirectory64>(0) {
+                    if let Some(mut callback_data) = file.section_table().pe_data_at(
+                        file.data(),
+                        (tls_directory.address_of_call_backs.get(LittleEndian)
+                            - file.relative_address_base()) as u32,
+                    ) {
+                        loop {
+                            let callback = callback_data.read_u64::<LE>().unwrap();
+                            if callback == 0 {
+                                break;
+                            }
+                            self.labels.insert(
+                                callback,
+                                Label {
+                                    type_: LabelType::TlsCallback,
+                                    name: "TLS callback".to_string(),
+                                },
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn section(&self, address: u64) -> Option<Section> {
+        let file = PeFile64::parse(self.data.as_slice(), self.va_space).unwrap();
+        let relative_address = (address - file.relative_address_base()) as u32;
+        let Some(section) = file.section_table().section_containing(relative_address) else {
+            return None;
+        };
+        let Some((data_offset, data_length)) = section.pe_range_at(relative_address, self.va_space) else {
+            return None;
+        };
+        Some(Section {
+            type_: if section.characteristics.get(LittleEndian)
+                & (IMAGE_SCN_CNT_CODE | IMAGE_SCN_MEM_EXECUTE)
+                != 0
+            {
+                SectionType::Assembly
+            } else {
+                SectionType::Raw
+            },
+            data_offset: data_offset as usize,
+            data_length: data_length as usize,
+        })
+    }
+}
+
+#[derive(Clone)]
+pub struct Label {
+    pub type_: LabelType,
+    pub name: String,
+}
+
+#[derive(Clone)]
+pub enum LabelType {
+    EntryPoint,
+    Export,
+    TlsCallback,
+    Custom,
+}
+
+pub struct Section {
+    pub type_: SectionType,
+    pub data_offset: usize,
+    pub data_length: usize,
+}
+
+pub enum SectionType {
+    Raw,
+    Assembly,
+}
+
+impl egui_dock::TabViewer for Viewer {
+    type Tab = Box<dyn View>;
+
+    fn ui(&mut self, ui: &mut Ui, tab: &mut Self::Tab) {
+        tab.ui(self, ui);
+    }
+
+    fn title(&mut self, tab: &mut Self::Tab) -> WidgetText {
+        tab.title().into()
     }
 }
 
