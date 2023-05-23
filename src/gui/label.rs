@@ -3,7 +3,7 @@ use egui_dock::egui::Sense;
 use egui_extras::{Column, TableBuilder};
 
 use crate::{
-    client::{AppContext, AppView},
+    gui::{AppContext, AppView},
     project::LabelType,
 };
 
@@ -15,7 +15,7 @@ impl AppView for LabelView {
         "Labels".into()
     }
 
-    fn ui(&mut self, viewer: &mut AppContext, ui: &mut Ui) {
+    fn ui(&mut self, context: &mut AppContext, ui: &mut Ui) {
         let row_height = ui.text_style_height(&TextStyle::Monospace);
         TableBuilder::new(ui)
             .striped(true)
@@ -36,7 +36,7 @@ impl AppView for LabelView {
             })
             .body(|mut body| {
                 let mut remove_label = None;
-                for (label_address, label) in viewer.project.labels.iter() {
+                for (label_address, label) in context.project.labels.iter() {
                     body.row(row_height, |mut row| {
                         // address column
                         row.col(|ui| {
@@ -46,8 +46,8 @@ impl AppView for LabelView {
                                         RichText::from(format!("{:016X}", label_address))
                                             .monospace(),
                                     )
-                                        .wrap(false)
-                                        .sense(Sense::click()),
+                                    .wrap(false)
+                                    .sense(Sense::click()),
                                 )
                                 .context_menu(|ui| {
                                     ui.menu_button("Copy", |ui| {
@@ -72,7 +72,7 @@ impl AppView for LabelView {
                                 })
                                 .clicked()
                             {
-                                viewer.go_to_address = Some(*label_address);
+                                context.go_to_address = Some(*label_address);
                             }
                         });
 
@@ -86,9 +86,9 @@ impl AppView for LabelView {
                                         LabelType::TlsCallback => "TLS callback",
                                         LabelType::Custom => "Custom",
                                     })
-                                        .monospace(),
+                                    .monospace(),
                                 )
-                                    .wrap(false),
+                                .wrap(false),
                             );
                         });
 
@@ -99,7 +99,7 @@ impl AppView for LabelView {
                     });
                 }
                 if let Some(label) = remove_label {
-                    viewer.project.labels.remove(&label);
+                    context.project.labels.remove(&label);
                 }
             });
 
@@ -108,12 +108,12 @@ impl AppView for LabelView {
             ui.id().with(""),
             Sense::click(),
         )
-            .context_menu(|ui| {
-                if ui.button("New Label").clicked() {
-                    viewer.label_window = Some(LabelWindow::default());
-                    ui.close_menu();
-                }
-            });
+        .context_menu(|ui| {
+            if ui.button("New Label").clicked() {
+                context.label_window = Some(LabelWindow::default());
+                ui.close_menu();
+            }
+        });
     }
 }
 

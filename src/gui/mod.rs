@@ -1,11 +1,14 @@
-use eframe::egui::{
-    Align, Button, CentralPanel, Context, Frame, Grid, Key, KeyboardShortcut, Layout, Modifiers,
-    Ui, Vec2, WidgetText, Window,
+use eframe::{
+    egui,
+    egui::{
+        Align, Button, CentralPanel, Context, Frame, Grid, Key, KeyboardShortcut, Layout,
+        Modifiers, TopBottomPanel, Ui, Vec2, WidgetText, Window,
+    },
 };
 use egui_dock::{DockArea, Node, Tree};
 
 use crate::{
-    client::{
+    gui::{
         assembly::AssemblyView,
         label::{LabelView, LabelWindow},
         process::AttachProcessWindow,
@@ -75,6 +78,23 @@ impl App {
 impl eframe::App for App {
     fn update(&mut self, ctx: &Context, frame: &mut eframe::Frame) {
         if let Some(context) = &mut self.context {
+            TopBottomPanel::top("menu_bar").show(ctx, |ui| {
+                egui::menu::bar(ui, |ui| {
+                    ui.menu_button("File", |ui| {
+                        if ui.button("Save").clicked() {
+                            ui.close_menu();
+                        }
+                        if ui.button("Save As...").clicked() {
+                            ui.close_menu();
+                        }
+                    });
+                    ui.menu_button("Help", |ui| {
+                        if ui.button("About").clicked() {
+                            ui.close_menu();
+                        }
+                    })
+                })
+            });
             CentralPanel::default()
                 .frame(Frame::none())
                 .show(ctx, |ui| {
@@ -124,16 +144,15 @@ impl eframe::App for App {
                         .add(Button::new("Open File").min_size(Vec2::new(100.0, 25.0)))
                         .clicked()
                     {
-                        let Some(path) = rfd::FileDialog::new().pick_file() else {
-                            todo!()
+                        if let Some(path) = rfd::FileDialog::new().pick_file() {
+                            self.context = Some(AppContext {
+                                project: Project::create_from_file(path).unwrap(),
+                                go_to_address: None,
+                                go_to_address_window: None,
+                                label_window: None,
+                            });
+                            self.open_label_view();
                         };
-                        self.context = Some(AppContext {
-                            project: Project::create_from_file(path).unwrap(),
-                            go_to_address: None,
-                            go_to_address_window: None,
-                            label_window: None,
-                        });
-                        self.open_label_view();
                     }
                     if ui
                         .add(Button::new("Attach Process").min_size(Vec2::new(100.0, 25.0)))
@@ -159,7 +178,7 @@ impl eframe::App for App {
                             label_window: None,
                         });
                         self.open_label_view();
-                    } else if !attach_process_window.open {
+                    } else if !attach_process_window.open() {
                         self.attach_process_window = None;
                     }
                 }
@@ -198,11 +217,12 @@ impl egui_dock::TabViewer for AppContext {
 trait AppView {
     fn title(&self) -> String;
 
-    fn ui(&mut self, viewer: &mut AppContext, ui: &mut Ui);
+    fn ui(&mut self, context: &mut AppContext, ui: &mut Ui);
 }
 
 struct GoToAddressWindow {
     open: bool,
+
     address: String,
 }
 

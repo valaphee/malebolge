@@ -1,12 +1,12 @@
 use std::{collections::BTreeMap, path::Path};
 
-use byteorder::{LE, ReadBytesExt};
+use byteorder::{ReadBytesExt, LE};
 use object::{
-    LittleEndian,
-    Object,
     pe::{
-        IMAGE_DIRECTORY_ENTRY_TLS, IMAGE_SCN_CNT_CODE, IMAGE_SCN_MEM_EXECUTE, ImageTlsDirectory64,
-    }, read::pe::{ExportTarget, ImageNtHeaders, ImageOptionalHeader, PeFile64}, ReadRef,
+        ImageTlsDirectory64, IMAGE_DIRECTORY_ENTRY_TLS, IMAGE_SCN_CNT_CODE, IMAGE_SCN_MEM_EXECUTE,
+    },
+    read::pe::{ExportTarget, ImageNtHeaders, ImageOptionalHeader, PeFile64},
+    LittleEndian, Object, ReadRef,
 };
 use thiserror::Error;
 use windows::Win32::{
@@ -81,7 +81,7 @@ impl Project {
                 std::mem::size_of_val(&module) as u32,
                 &mut 0,
             )
-                .ok()?;
+            .ok()?;
             let mut module_info = MODULEINFO::default();
             GetModuleInformation(
                 process,
@@ -89,7 +89,7 @@ impl Project {
                 &mut module_info,
                 std::mem::size_of_val(&module_info) as u32,
             )
-                .ok()?;
+            .ok()?;
             let mut data = vec![0; module_info.SizeOfImage as usize];
             ReadProcessMemory(
                 process,
@@ -98,7 +98,7 @@ impl Project {
                 data.len(),
                 None,
             )
-                .ok()?;
+            .ok()?;
             CloseHandle(process);
             data
         };

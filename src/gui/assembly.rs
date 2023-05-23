@@ -2,14 +2,14 @@ use std::collections::HashSet;
 
 use eframe::{
     egui::{
-        Align, Color32, FontId, Label, RichText, Sense, Style, text::LayoutJob, TextStyle, Ui, Vec2,
+        text::LayoutJob, Align, Color32, FontId, Label, RichText, Sense, Style, TextStyle, Ui, Vec2,
     },
     epaint::text::TextWrapping,
 };
 use egui_extras::{Column, TableBuilder};
 use iced_x86::{Decoder, DecoderOptions, Formatter, FormatterTextKind, NasmFormatter};
 
-use crate::client::{AppContext, AppView, label::LabelWindow};
+use crate::gui::{label::LabelWindow, AppContext, AppView};
 
 pub struct AssemblyView {
     address: u64,
@@ -37,7 +37,7 @@ impl AppView for AssemblyView {
         format!("Assembly ({:016X})", self.address).into()
     }
 
-    fn ui(&mut self, viewer: &mut AppContext, ui: &mut Ui) {
+    fn ui(&mut self, context: &mut AppContext, ui: &mut Ui) {
         let row_height = ui.text_style_height(&TextStyle::Monospace);
         let mut table_builder = TableBuilder::new(ui)
             .min_scrolled_height(0.0)
@@ -52,8 +52,8 @@ impl AppView for AssemblyView {
             table_builder
         };
         table_builder.body(|mut body| {
-            let section = viewer.project.section(self.address).unwrap();
-            let data = &viewer.project.data
+            let section = context.project.section(self.address).unwrap();
+            let data = &context.project.data
                 [section.data_offset..section.data_offset + section.data_length];
             let style = body.ui_mut().style().clone();
             body.rows(row_height, self.rows.len() + 100, |index, mut row| {
@@ -100,7 +100,7 @@ impl AppView for AssemblyView {
                     }
                     &self.rows[index]
                 };
-                let label = viewer.project.labels.get(&instruction.address);
+                let label = context.project.labels.get(&instruction.address);
 
                 // address column
                 row.col(|ui| {
@@ -108,36 +108,36 @@ impl AppView for AssemblyView {
                         Label::new(
                             RichText::from(format!("{:016X}", instruction.address)).monospace(),
                         )
-                            .wrap(false)
-                            .sense(Sense::click()),
+                        .wrap(false)
+                        .sense(Sense::click()),
                     )
-                        .context_menu(|ui| {
-                            ui.menu_button("Copy", |ui| {
-                                if ui.button("VA").clicked() {
-                                    ui.close_menu();
-                                    ui.output_mut(|output| {
-                                        output.copied_text = format!("{:016X}", instruction.address)
-                                    });
-                                }
-                                if ui.button("Instruction").clicked() {
-                                    ui.close_menu();
-                                    ui.output_mut(|output| {
-                                        output.copied_text = instruction
-                                            .instruction
-                                            .iter()
-                                            .map(|(text, _)| text.text.as_str())
-                                            .collect()
-                                    });
-                                }
-                            });
-                            if ui.button("Label").clicked() && viewer.label_window.is_none() {
+                    .context_menu(|ui| {
+                        ui.menu_button("Copy", |ui| {
+                            if ui.button("VA").clicked() {
                                 ui.close_menu();
-                                viewer.label_window = Some(LabelWindow::new(
-                                    label.map_or("".to_string(), |label| label.name.clone()),
-                                    instruction.address,
-                                ));
+                                ui.output_mut(|output| {
+                                    output.copied_text = format!("{:016X}", instruction.address)
+                                });
+                            }
+                            if ui.button("Instruction").clicked() {
+                                ui.close_menu();
+                                ui.output_mut(|output| {
+                                    output.copied_text = instruction
+                                        .instruction
+                                        .iter()
+                                        .map(|(text, _)| text.text.as_str())
+                                        .collect()
+                                });
                             }
                         });
+                        if ui.button("Label").clicked() && context.label_window.is_none() {
+                            ui.close_menu();
+                            context.label_window = Some(LabelWindow::new(
+                                label.map_or("".to_string(), |label| label.name.clone()),
+                                instruction.address,
+                            ));
+                        }
+                    });
                 });
 
                 // bytes column
@@ -166,7 +166,7 @@ impl AppView for AssemblyView {
                                     ) {
                                         self.go_to_row = Some(row);
                                     } else {
-                                        viewer.go_to_address = Some(address);
+                                        context.go_to_address = Some(address);
                                     }
                                 }
                             } else {

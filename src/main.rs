@@ -2,9 +2,9 @@
 #![feature(strict_provenance)]
 #![windows_subsystem = "windows"]
 
-use crate::client::App;
+use crate::gui::App;
 
-mod client;
+mod gui;
 mod project;
 
 pub fn main() -> eframe::Result<()> {

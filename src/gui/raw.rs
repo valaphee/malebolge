@@ -1,7 +1,7 @@
 use eframe::egui::{Label, RichText, TextStyle, Ui};
 use egui_extras::{Column, TableBuilder};
 
-use crate::client::{AppContext, AppView};
+use crate::gui::{AppContext, AppView};
 
 pub struct RawView {
     address: u64,
@@ -18,7 +18,7 @@ impl AppView for RawView {
         format!("Raw ({:016X})", self.address)
     }
 
-    fn ui(&mut self, viewer: &mut AppContext, ui: &mut Ui) {
+    fn ui(&mut self, context: &mut AppContext, ui: &mut Ui) {
         let row_height = ui.text_style_height(&TextStyle::Monospace);
         TableBuilder::new(ui)
             .min_scrolled_height(0.0)
@@ -33,8 +33,8 @@ impl AppView for RawView {
                 row.col(|_ui| {});
             })
             .body(|body| {
-                let section = viewer.project.section(self.address).unwrap();
-                let data = &viewer.project.data[section.data_offset as usize
+                let section = context.project.section(self.address).unwrap();
+                let data = &context.project.data[section.data_offset as usize
                     ..(section.data_offset + section.data_length) as usize];
                 let aligned_address = self.address as usize / 16;
                 let aligned_address_offset = self.address as usize % 16;
@@ -57,9 +57,9 @@ impl AppView for RawView {
                                         "{:016X}",
                                         (index + aligned_address) * 16
                                     ))
-                                        .monospace(),
+                                    .monospace(),
                                 )
-                                    .wrap(false),
+                                .wrap(false),
                             );
                         });
 

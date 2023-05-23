@@ -7,13 +7,14 @@ use egui_extras::{Column, TableBuilder};
 use windows::Win32::{
     Foundation::{CloseHandle, FALSE, HMODULE, MAX_PATH},
     System::{
-        ProcessStatus::{EnumProcesses, EnumProcessModules, GetModuleBaseNameW},
+        ProcessStatus::{EnumProcessModules, EnumProcesses, GetModuleBaseNameW},
         Threading::{OpenProcess, PROCESS_QUERY_INFORMATION, PROCESS_VM_READ},
     },
 };
 
 pub struct AttachProcessWindow {
-    pub(crate) open: bool,
+    open: bool,
+
     processes: Vec<(u32, String)>,
 }
 
@@ -37,8 +38,8 @@ impl AttachProcessWindow {
                 std::mem::size_of_val(&pids) as u32,
                 &mut pids_length,
             )
-                .ok()
-                .unwrap();
+            .ok()
+            .unwrap();
             for &pid in &pids[..pids_length as usize / std::mem::size_of::<u32>()] {
                 let Ok(process) = OpenProcess(PROCESS_VM_READ | PROCESS_QUERY_INFORMATION, FALSE, pid) else {
                     continue;
@@ -50,8 +51,8 @@ impl AttachProcessWindow {
                     std::mem::size_of_val(&module) as u32,
                     &mut 0,
                 )
-                    .ok()
-                    .is_err()
+                .ok()
+                .is_err()
                 {
                     continue;
                 }
@@ -130,5 +131,9 @@ impl AttachProcessWindow {
             self.open = false;
         }
         process
+    }
+
+    pub fn open(&self) -> bool {
+        self.open
     }
 }
