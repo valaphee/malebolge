@@ -7,11 +7,12 @@ use eframe::{
 };
 use egui_dock::{DockArea, Node, Tree};
 
+#[cfg(target_os = "windows")]
+use crate::gui::process::AttachProcessWindow;
 use crate::{
     gui::{
         assembly::AssemblyView,
         label::{LabelView, LabelWindow},
-        process::AttachProcessWindow,
         raw::RawView,
     },
     project::{Project, SectionType},
@@ -19,11 +20,14 @@ use crate::{
 
 mod assembly;
 mod label;
-mod process;
 mod raw;
+
+#[cfg(target_os = "windows")]
+mod process;
 
 #[derive(Default)]
 pub struct App {
+    #[cfg(target_os = "windows")]
     attach_process_window: Option<AttachProcessWindow>,
 
     context: Option<AppContext>,
@@ -154,6 +158,7 @@ impl eframe::App for App {
                             self.open_label_view();
                         };
                     }
+                    #[cfg(target_os = "windows")]
                     if ui
                         .add(Button::new("Attach Process").min_size(Vec2::new(100.0, 25.0)))
                         .clicked()
@@ -168,6 +173,7 @@ impl eframe::App for App {
                     }
                 });
 
+                #[cfg(target_os = "windows")]
                 // check attach process window
                 if let Some(attach_process_window) = &mut self.attach_process_window {
                     if let Some(pid) = attach_process_window.ui(ui) {
