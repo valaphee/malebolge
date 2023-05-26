@@ -10,6 +10,7 @@ use egui_extras::{Column, TableBuilder};
 use iced_x86::{Decoder, DecoderOptions, Formatter, FormatterTextKind, NasmFormatter};
 
 use crate::{
+    asm::cfo::Cfo,
     gui::{AppContext, AppView},
     project::DataView,
 };
@@ -68,7 +69,7 @@ impl AppView for AssemblyView {
                     let position = (rva - self.rva) as usize;
                     let mut decoder = Decoder::with_ip(64, data, rva, DecoderOptions::NONE);
                     decoder.set_position(position).unwrap();
-                    let instruction = decoder.decode();
+                    let instruction = /*decoder.decode()*/Cfo::new(&mut decoder).next().unwrap();
                     self.last_rva += (decoder.position() - position) as u64;
 
                     // format instruction

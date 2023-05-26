@@ -1,6 +1,9 @@
 use std::cell::RefCell;
 
-use eframe::egui::{Align, Button, CentralPanel, Context, Frame, Grid, Id, Key, KeyboardShortcut, Layout, Modifiers, Ui, Vec2, WidgetText, Window};
+use eframe::egui::{
+    Align, Button, CentralPanel, Context, Frame, Grid, Id, Key, KeyboardShortcut, Layout,
+    Modifiers, Ui, Vec2, WidgetText, Window,
+};
 use egui_dock::{DockArea, Node, Tree};
 
 use crate::{

@@ -4,6 +4,7 @@
 
 use crate::gui::App;
 
+mod asm;
 mod gui;
 mod project;
 
