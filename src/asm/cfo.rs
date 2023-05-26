@@ -24,26 +24,20 @@ impl Iterator for Cfo<'_, '_> {
                         if self.decoder.ip() < align_address {
                             align = true;
 
-                            // store address and position
                             let address = self.decoder.ip();
                             let position = self.decoder.position();
 
-                            // check if branch target is aligned, or a contrary instruction is found
                             let mut instruction_peek = Instruction::default();
                             while self.decoder.can_decode()
                                 && self.decoder.ip() < align_address
                                 && align
                             {
                                 self.decoder.decode_out(&mut instruction_peek);
-                                if self.decoder.ip() == align_address
-                                    || instruction.code()
-                                        == instruction_peek.code().negate_condition_code()
-                                {
+                                if self.decoder.ip() == align_address {
                                     align = false;
                                 }
                             }
 
-                            // restore address and position
                             self.decoder.set_ip(address);
                             self.decoder.set_position(position).unwrap();
                         }
@@ -56,7 +50,7 @@ impl Iterator for Cfo<'_, '_> {
                                         - instruction.len(),
                                 )
                                 .unwrap();
-                            return self.next();
+                            /*return self.next();*/
                         }
                     }
                 }

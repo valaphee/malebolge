@@ -162,7 +162,7 @@ impl egui_dock::TabViewer for AppContext<'_> {
     }
 
     fn id(&mut self, tab: &mut Self::Tab) -> Id {
-        Id::new(std::ptr::addr_of!(tab))
+        Id::new(tab as *const Self::Tab)
     }
 }
 
