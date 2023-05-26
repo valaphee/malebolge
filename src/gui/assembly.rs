@@ -25,11 +25,11 @@ pub struct AssemblyView {
 }
 
 impl AssemblyView {
-    pub fn new(address: u64, data_view: DataView) -> Self {
+    pub fn new(rva: u64, data_view: DataView) -> Self {
         Self {
-            rva: address,
+            rva,
             data_range: data_view.range,
-            last_rva: address,
+            last_rva: rva,
             rvas: Default::default(),
             rows: Default::default(),
             scroll_to_row: Default::default(),

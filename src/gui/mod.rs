@@ -1,9 +1,6 @@
 use std::cell::RefCell;
 
-use eframe::egui::{
-    Align, Button, CentralPanel, Context, Frame, Grid, Key, KeyboardShortcut, Layout, Modifiers,
-    Ui, Vec2, WidgetText, Window,
-};
+use eframe::egui::{Align, Button, CentralPanel, Context, Frame, Grid, Id, Key, KeyboardShortcut, Layout, Modifiers, Ui, Vec2, WidgetText, Window};
 use egui_dock::{DockArea, Node, Tree};
 
 use crate::{
@@ -50,7 +47,7 @@ impl App {
     }
 
     fn open_label_view(&mut self) {
-        self.open_view(Box::new(LabelView::default()));
+        self.open_view(Box::new(LabelView));
     }
 }
 
@@ -159,6 +156,10 @@ impl egui_dock::TabViewer for AppContext<'_> {
 
     fn title(&mut self, tab: &mut Self::Tab) -> WidgetText {
         tab.title().into()
+    }
+
+    fn id(&mut self, tab: &mut Self::Tab) -> Id {
+        Id::new(std::ptr::addr_of!(tab))
     }
 }
 

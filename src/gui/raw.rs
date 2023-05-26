@@ -14,9 +14,9 @@ pub struct RawView {
 }
 
 impl RawView {
-    pub fn new(address: u64, data_view: DataView) -> Self {
+    pub fn new(rva: u64, data_view: DataView) -> Self {
         Self {
-            rva: address,
+            rva,
             data_range: data_view.range,
         }
     }

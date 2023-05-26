@@ -10,7 +10,7 @@ description = "Reverse-engineering sandbox"
 [dependencies]
 anyhow = "1.0.71"
 byteorder = "1.4.3"
-eframe = { version = "0.21.3", default-features = false, features = ["default_fonts", "wgpu"] }
+eframe = { version = "0.21.3", default-features = false, features = ["accesskit", "default_fonts", "wgpu", "wayland"] }
 egui_dock = "0.5.0"
 egui_extras = "0.21.0"
 iced-x86 = "1.18.0"

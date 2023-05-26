@@ -7,7 +7,6 @@ use crate::{
     project,
 };
 
-#[derive(Default)]
 pub struct LabelView;
 
 impl AppView for LabelView {
