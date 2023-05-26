@@ -2,7 +2,7 @@
 // Microsoft Visual C++ generated include file.
 // Used by stardust.rc
 //
-#define IDI_AMALGAM                     1
+#define IDI_MALEBOLGE                   1
 
 // Next default values for new objects
 //

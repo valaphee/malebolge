@@ -1,8 +1,11 @@
 // Microsoft Visual C++ generated resource script.
 //
 #include "resource.h"
+
 #define APSTUDIO_READONLY_SYMBOLS
+
 #include <winres.h>
+
 #undef APSTUDIO_READONLY_SYMBOLS
 /////////////////////////////////////////////////////////////////////////////
 // English (United States) resources
@@ -42,37 +45,41 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 1,2,0,0
- PRODUCTVERSION 1,2,0,0
- FILEFLAGSMASK 0x3fL
+FILEVERSION 1,2,0,0
+PRODUCTVERSION 1,2,0,0
+FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
- FILEFLAGS 0x1L
+FILEFLAGS 0x1L
 #else
- FILEFLAGS 0x0L
+FILEFLAGS 0x0L
 #endif
- FILEOS 0x40004L
- FILETYPE 0x1L
- FILESUBTYPE 0x0L
+FILEOS 0x40004L
+FILETYPE 0x1L
+FILESUBTYPE 0x0L
 BEGIN
-    BLOCK "StringFileInfo"
-    BEGIN
-        BLOCK "040004b0"
-        BEGIN
-            VALUE "CompanyName", "Valaphee"
-            VALUE "FileDescription", "Reverse-engineering sandbox"
-            VALUE "FileVersion", "0.0.0.0"
-            VALUE "InternalName", "amalgam.exe"
-            VALUE "LegalCopyright", "Copyright (c) 2023, Valaphee."
-            VALUE "OriginalFilename", "amalgam.exe"
-            VALUE "ProductName", "amalgam"
-            VALUE "ProductVersion", "0.0.0.0"
-        END
-    END
-    BLOCK "VarFileInfo"
-    BEGIN
-        VALUE "Translation", 0x400, 1200
-    END
+        BLOCK
+"StringFileInfo"
+BEGIN
+        BLOCK
+"040004b0"
+BEGIN
+        VALUE
+"CompanyName", "Valaphee"
+VALUE "FileDescription", "Reverse-engineering sandbox"
+VALUE "FileVersion", "0.0.0.0"
+VALUE "InternalName", "malebolge.exe"
+VALUE "LegalCopyright", "Copyright (c) 2023, Valaphee."
+VALUE "OriginalFilename", "malebolge.exe"
+VALUE "ProductName", "malebolge"
+VALUE "ProductVersion", "0.0.0.0"
 END
+        END
+BLOCK "VarFileInfo"
+BEGIN
+        VALUE
+"Translation", 0x400, 1200
+END
+        END
 
 
 /////////////////////////////////////////////////////////////////////////////
@@ -82,7 +89,7 @@ END
 
 // Icon with lowest ID value placed first to ensure application icon
 // remains consistent on all systems.
-IDI_AMALGAM                ICON                    "amalgam.ico"
+IDI_MALEBOLGE              ICON                    "malebolge.ico"
 
 #endif    // English (United States) resources
 /////////////////////////////////////////////////////////////////////////////

@@ -1,15 +1,24 @@
+use std::ops::Range;
+
 use eframe::egui::{Label, RichText, TextStyle, Ui};
 use egui_extras::{Column, TableBuilder};
 
-use crate::gui::{AppContext, AppView};
+use crate::{
+    gui::{AppContext, AppView},
+    project::DataView,
+};
 
 pub struct RawView {
     address: u64,
+    data_range: Range<usize>,
 }
 
 impl RawView {
-    pub fn new(address: u64) -> Self {
-        Self { address }
+    pub fn new(address: u64, data_view: DataView) -> Self {
+        Self {
+            address,
+            data_range: data_view.range,
+        }
     }
 }
 
@@ -33,11 +42,10 @@ impl AppView for RawView {
                 row.col(|_ui| {});
             })
             .body(|body| {
-                let section = context.project.section(self.address).unwrap();
-                let data = &context.project.data[section.data_offset as usize
-                    ..(section.data_offset + section.data_length) as usize];
-                let aligned_address = self.address as usize / 16;
-                let aligned_address_offset = self.address as usize % 16;
+                let data = &context.project.data()[self.data_range.clone()];
+                let address = (context.project.base() + self.address) as usize;
+                let aligned_address = address / 16;
+                let aligned_address_offset = address % 16;
                 body.rows(
                     row_height,
                     (data.len() + aligned_address_offset).div_ceil(16),

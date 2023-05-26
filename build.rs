@@ -8,12 +8,12 @@ fn main() -> io::Result<()> {
     {
         WindowsResource::new()
             .set("FileDescription", "Reverse-engineering sandbox")
-            .set("ProductName", "amalgam")
-            .set("OriginalFilename", "amalgam.exe")
+            .set("ProductName", "malebolge")
+            .set("OriginalFilename", "malebolge.exe")
             .set("LegalCopyright", "Copyright (c) 2023, Valaphee.")
             .set("CompanyName", "Valaphee")
-            .set("InternalName", "amalgam.exe")
-            .set_icon("amalgam.ico")
+            .set("InternalName", "malebolge.exe")
+            .set_icon("malebolge.ico")
             .compile()?;
     }
     Ok(())

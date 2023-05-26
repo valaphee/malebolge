@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, ops::Range};
 
 use eframe::{
     egui::{
@@ -9,25 +9,32 @@ use eframe::{
 use egui_extras::{Column, TableBuilder};
 use iced_x86::{Decoder, DecoderOptions, Formatter, FormatterTextKind, NasmFormatter};
 
-use crate::gui::{label::LabelWindow, AppContext, AppView};
+use crate::{
+    gui::{AppContext, AppView},
+    project::DataView,
+};
 
 pub struct AssemblyView {
+    bitness: u32,
     address: u64,
+    data_range: Range<usize>,
 
     last_address: u64,
     addresses: HashSet<u64>,
     rows: Vec<Row>,
-    go_to_row: Option<usize>,
+    scroll_to_row: Option<usize>,
 }
 
 impl AssemblyView {
-    pub fn new(address: u64) -> Self {
+    pub fn new(bitness: u32, address: u64, data_view: DataView) -> Self {
         Self {
+            bitness,
             address,
+            data_range: data_view.range,
             last_address: address,
             addresses: Default::default(),
             rows: Default::default(),
-            go_to_row: Default::default(),
+            scroll_to_row: Default::default(),
         }
     }
 }
@@ -45,27 +52,28 @@ impl AppView for AssemblyView {
             .column(Column::auto())
             .columns(Column::auto().resizable(true), 2)
             .column(Column::remainder());
-        table_builder = if let Some(row) = self.go_to_row {
-            self.go_to_row = None;
+        table_builder = if let Some(row) = self.scroll_to_row {
+            self.scroll_to_row = None;
             table_builder.scroll_to_row(row, Some(Align::TOP))
         } else {
             table_builder
         };
         table_builder.body(|mut body| {
-            let section = context.project.section(self.address).unwrap();
-            let data = &context.project.data
-                [section.data_offset..section.data_offset + section.data_length];
+            let data = &context.project.data()[self.data_range.clone()];
             let style = body.ui_mut().style().clone();
             body.rows(row_height, self.rows.len() + 100, |index, mut row| {
-                // cache decoded instructions, rows will always be loaded in order, therefore
-                // its save to use a Vec
                 let instruction = if let Some(instruction) = self.rows.get(index) {
                     instruction
                 } else {
                     // decode instruction
                     let address = self.last_address;
                     let position = (address - self.address) as usize;
-                    let mut decoder = Decoder::with_ip(64, data, address, DecoderOptions::NONE);
+                    let mut decoder = Decoder::with_ip(
+                        self.bitness,
+                        data,
+                        context.project.base() + address,
+                        DecoderOptions::NONE,
+                    );
                     decoder.set_position(position).unwrap();
                     let instruction = decoder.decode();
                     self.last_address += (decoder.position() - position) as u64;
@@ -100,7 +108,7 @@ impl AppView for AssemblyView {
                     }
                     &self.rows[index]
                 };
-                let label = context.project.labels.get(&instruction.address);
+                let label = context.project.label_by_rva.get(&instruction.address);
 
                 // address column
                 row.col(|ui| {
@@ -119,6 +127,15 @@ impl AppView for AssemblyView {
                                     output.copied_text = format!("{:016X}", instruction.address)
                                 });
                             }
+                            if ui.button("RVA").clicked() {
+                                ui.close_menu();
+                                ui.output_mut(|output| {
+                                    output.copied_text = format!(
+                                        "{:016X}",
+                                        instruction.address - context.project.base()
+                                    )
+                                });
+                            }
                             if ui.button("Instruction").clicked() {
                                 ui.close_menu();
                                 ui.output_mut(|output| {
@@ -130,13 +147,6 @@ impl AppView for AssemblyView {
                                 });
                             }
                         });
-                        if ui.button("Label").clicked() && context.label_window.is_none() {
-                            ui.close_menu();
-                            context.label_window = Some(LabelWindow::new(
-                                label.map_or("".to_string(), |label| label.name.clone()),
-                                instruction.address,
-                            ));
-                        }
                     });
                 });
 
@@ -164,9 +174,10 @@ impl AppView for AssemblyView {
                                             }
                                         },
                                     ) {
-                                        self.go_to_row = Some(row);
+                                        self.scroll_to_row = Some(row);
                                     } else {
-                                        context.go_to_address = Some(address);
+                                        // TODO context.open_view.
+                                        // push(Box::new())
                                     }
                                 }
                             } else {
@@ -180,7 +191,7 @@ impl AppView for AssemblyView {
                 row.col(|ui| {
                     if let Some(label) = label {
                         let mut layout_job = LayoutJob::simple_singleline(
-                            label.name.clone(),
+                            format!("{}", label),
                             TextStyle::Monospace.resolve(&style),
                             style.visuals.text_color(),
                         );
@@ -216,17 +227,18 @@ impl Row {
     }
 
     fn post_format(&mut self, style: &Style) {
-        {
-            let text_format = &mut self.bytes.sections.first_mut().unwrap().format;
-            text_format.font_id = TextStyle::Monospace.resolve(style);
-            if text_format.color == Color32::TEMPORARY_COLOR {
-                text_format.color = style.visuals.text_color()
-            }
-            self.bytes.wrap = TextWrapping {
-                max_rows: 1,
-                ..Default::default()
-            };
+        // bytes column
+        let text_format = &mut self.bytes.sections.first_mut().unwrap().format;
+        text_format.font_id = TextStyle::Monospace.resolve(style);
+        if text_format.color == Color32::TEMPORARY_COLOR {
+            text_format.color = style.visuals.text_color()
         }
+        self.bytes.wrap = TextWrapping {
+            max_rows: 1,
+            ..Default::default()
+        };
+
+        // instruction column
         for (text, _) in &mut self.instruction {
             let text_format = &mut text.sections.first_mut().unwrap().format;
             text_format.font_id = TextStyle::Monospace.resolve(style);

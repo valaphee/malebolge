@@ -1,10 +1,10 @@
 [package]
-name = "amalgam"
+name = "malebolge"
 version = "0.0.0"
 edition = "2021"
 authors = ["Valaphee <iam@valaphee.com>"]
 license = "Apache-2.0"
-repository = "https://github.com/valaphee/amalgam.git"
+repository = "https://github.com/valaphee/malebolge.git"
 description = "Reverse-engineering sandbox"
 
 [dependencies]

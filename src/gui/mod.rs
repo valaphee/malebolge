@@ -1,44 +1,28 @@
-use eframe::{
-    egui,
-    egui::{
-        Align, Button, CentralPanel, Context, Frame, Grid, Key, KeyboardShortcut, Layout,
-        Modifiers, TopBottomPanel, Ui, Vec2, WidgetText, Window,
-    },
+use eframe::egui::{
+    Align, Button, CentralPanel, Context, Frame, Grid, Key, KeyboardShortcut, Layout, Modifiers,
+    Ui, Vec2, WidgetText, Window,
 };
 use egui_dock::{DockArea, Node, Tree};
 
-#[cfg(target_os = "windows")]
-use crate::gui::process::AttachProcessWindow;
-use crate::{
-    gui::{
-        assembly::AssemblyView,
-        label::{LabelView, LabelWindow},
-        raw::RawView,
-    },
-    project::{Project, SectionType},
-};
+use crate::{gui::label::LabelView, project::Project};
 
 mod assembly;
 mod label;
 mod raw;
 
-#[cfg(target_os = "windows")]
-mod process;
-
 #[derive(Default)]
 pub struct App {
-    #[cfg(target_os = "windows")]
-    attach_process_window: Option<AttachProcessWindow>,
-
     context: Option<AppContext>,
+
     views: Tree<Box<dyn AppView>>,
+    go_to_address_window: Option<GoToAddressWindow>,
 }
 
 impl App {
-    fn open_view(&mut self, view: Box<dyn AppView>) {
+    fn open_view(views: &mut Tree<Box<dyn AppView>>, view: Box<dyn AppView>) {
         let title = view.title();
         if let Some((node_index, tab_index)) =
-            self.views
+            views
                 .iter()
                 .enumerate()
                 .find_map(|(node_index, node)| match node {
@@ -52,92 +36,48 @@ impl App {
                     _ => None,
                 })
         {
-            self.views.set_focused_node(node_index.into());
-            self.views
-                .set_active_tab(node_index.into(), tab_index.into());
+            views.set_focused_node(node_index.into());
+            views.set_active_tab(node_index.into(), tab_index.into());
         } else {
-            self.views.push_to_first_leaf(view)
+            views.push_to_first_leaf(view)
         }
     }
 
-    fn open_label_view(&mut self) {
-        self.open_view(Box::new(LabelView::default()));
-    }
-
-    fn open_address_view(&mut self, address: u64) {
-        let Some(section) = self.context.as_ref().unwrap().project.section(address) else {
-            return;
-        };
-        match section.type_ {
-            SectionType::Raw => {
-                self.open_view(Box::new(RawView::new(address)));
-            }
-            SectionType::Assembly => {
-                self.open_view(Box::new(AssemblyView::new(address)));
-            }
-        }
+    fn open_label_view(views: &mut Tree<Box<dyn AppView>>) {
+        Self::open_view(views, Box::new(LabelView::default()));
     }
 }
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &Context, frame: &mut eframe::Frame) {
         if let Some(context) = &mut self.context {
-            TopBottomPanel::top("menu_bar").show(ctx, |ui| {
-                egui::menu::bar(ui, |ui| {
-                    ui.menu_button("File", |ui| {
-                        if ui.button("Save").clicked() {
-                            ui.close_menu();
-                        }
-                        if ui.button("Save As...").clicked() {
-                            ui.close_menu();
-                        }
-                    });
-                    ui.menu_button("Help", |ui| {
-                        if ui.button("About").clicked() {
-                            ui.close_menu();
-                        }
-                    })
-                })
-            });
             CentralPanel::default()
                 .frame(Frame::none())
                 .show(ctx, |ui| {
                     DockArea::new(&mut self.views).show_inside(ui, context);
 
-                    // check go to address window
-                    if let Some(go_to_address_window) = &mut context.go_to_address_window {
-                        if let Some(address) = go_to_address_window.ui(ui) {
-                            context.go_to_address = Some(address);
+                    // go to address window
+                    if let Some(go_to_address_window) = &mut self.go_to_address_window {
+                        if let Some(_address) = go_to_address_window.ui(ui) {
+                            // TODO context.open_view.push(Box::new());
                         }
                         if !go_to_address_window.open() {
-                            context.go_to_address_window = None;
-                        }
-                    }
-
-                    // check label window
-                    if let Some(label_window) = &mut context.label_window {
-                        if let Some(label) = label_window.ui(ui) {
-                            context.project.labels.insert(label.0, label.1);
-                        }
-                        if !label_window.open() {
-                            context.label_window = None;
+                            self.go_to_address_window = None;
                         }
                     }
 
                     // Ctrl+G: go to address
                     if ui.input_mut(|input| {
                         input.consume_shortcut(&KeyboardShortcut::new(Modifiers::CTRL, Key::G))
-                    }) && context.go_to_address_window.is_none()
+                    }) && self.go_to_address_window.is_none()
                     {
-                        context.go_to_address_window = Some(Default::default())
+                        self.go_to_address_window = Some(Default::default())
                     }
                 });
 
-            if let Some(address) = context.go_to_address {
-                context.go_to_address = None;
-                self.open_address_view(address);
+            while let Some(view) = context.open_view.pop() {
+                App::open_view(&mut self.views, view);
             }
-
             if self.views.is_empty() {
                 self.context = None;
             }
@@ -145,25 +85,13 @@ impl eframe::App for App {
             CentralPanel::default().show(ctx, |ui| {
                 ui.vertical_centered(|ui| {
                     if ui
-                        .add(Button::new("Open File").min_size(Vec2::new(100.0, 25.0)))
+                        .add(Button::new("Open").min_size(Vec2::new(100.0, 25.0)))
                         .clicked()
                     {
                         if let Some(path) = rfd::FileDialog::new().pick_file() {
-                            self.context = Some(AppContext {
-                                project: Project::create_from_file(path).unwrap(),
-                                go_to_address: None,
-                                go_to_address_window: None,
-                                label_window: None,
-                            });
-                            self.open_label_view();
+                            self.context = Some(AppContext::new(Project::new(path).unwrap()));
+                            Self::open_label_view(&mut self.views);
                         };
-                    }
-                    #[cfg(target_os = "windows")]
-                    if ui
-                        .add(Button::new("Attach Process").min_size(Vec2::new(100.0, 25.0)))
-                        .clicked()
-                    {
-                        self.attach_process_window = Some(AttachProcessWindow::new());
                     }
                     if ui
                         .add(Button::new("Exit").min_size(Vec2::new(100.0, 25.0)))
@@ -172,22 +100,6 @@ impl eframe::App for App {
                         frame.close()
                     }
                 });
-
-                #[cfg(target_os = "windows")]
-                // check attach process window
-                if let Some(attach_process_window) = &mut self.attach_process_window {
-                    if let Some(pid) = attach_process_window.ui(ui) {
-                        self.context = Some(AppContext {
-                            project: Project::create_from_process(pid).unwrap(),
-                            go_to_address: None,
-                            go_to_address_window: None,
-                            label_window: None,
-                        });
-                        self.open_label_view();
-                    } else if !attach_process_window.open() {
-                        self.attach_process_window = None;
-                    }
-                }
             });
         }
 
@@ -203,9 +115,16 @@ impl eframe::App for App {
 struct AppContext {
     project: Project,
 
-    go_to_address: Option<u64>,
-    go_to_address_window: Option<GoToAddressWindow>,
-    label_window: Option<LabelWindow>,
+    open_view: Vec<Box<dyn AppView>>,
+}
+
+impl AppContext {
+    fn new(project: Project) -> Self {
+        Self {
+            project,
+            open_view: Default::default(),
+        }
+    }
 }
 
 impl egui_dock::TabViewer for AppContext {
