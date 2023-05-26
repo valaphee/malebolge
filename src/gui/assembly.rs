@@ -176,8 +176,7 @@ impl AppView for AssemblyView {
                                     ) {
                                         self.scroll_to_row = Some(row);
                                     } else {
-                                        // TODO context.open_view.
-                                        // push(Box::new())
+                                        // TODO context.open_view.push(Box::new())
                                     }
                                 }
                             } else {
