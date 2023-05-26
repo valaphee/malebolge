@@ -9,14 +9,14 @@ use crate::{
 };
 
 pub struct RawView {
-    address: u64,
+    rva: u64,
     data_range: Range<usize>,
 }
 
 impl RawView {
     pub fn new(address: u64, data_view: DataView) -> Self {
         Self {
-            address,
+            rva: address,
             data_range: data_view.range,
         }
     }
@@ -24,7 +24,7 @@ impl RawView {
 
 impl AppView for RawView {
     fn title(&self) -> String {
-        format!("Raw ({:016X})", self.address)
+        format!("Raw ({:016X})", self.rva)
     }
 
     fn ui(&mut self, context: &mut AppContext, ui: &mut Ui) {
@@ -43,29 +43,25 @@ impl AppView for RawView {
             })
             .body(|body| {
                 let data = &context.project.data()[self.data_range.clone()];
-                let address = (context.project.base() + self.address) as usize;
-                let aligned_address = address / 16;
-                let aligned_address_offset = address % 16;
+                let aligned_rva = self.rva as usize / 16;
+                let aligned_rva_offset = self.rva as usize % 16;
                 body.rows(
                     row_height,
-                    (data.len() + aligned_address_offset).div_ceil(16),
+                    (data.len() + aligned_rva_offset).div_ceil(16),
                     |index, mut row| {
                         let data = &data[if index == 0 {
                             0
                         } else {
-                            index * 16 - aligned_address_offset
+                            index * 16 - aligned_rva_offset
                         }
-                            ..(index * 16 + 16 - aligned_address_offset).min(data.len())];
+                            ..(index * 16 + 16 - aligned_rva_offset).min(data.len())];
 
                         // address column
                         row.col(|ui| {
                             ui.add(
                                 Label::new(
-                                    RichText::from(format!(
-                                        "{:016X}",
-                                        (index + aligned_address) * 16
-                                    ))
-                                    .monospace(),
+                                    RichText::from(format!("{:016X}", (index + aligned_rva) * 16))
+                                        .monospace(),
                                 )
                                 .wrap(false),
                             );
@@ -81,7 +77,7 @@ impl AppView for RawView {
                             if index == 0 {
                                 text = format!(
                                     "{}{}",
-                                    "   ".repeat(aligned_address_offset as usize),
+                                    "   ".repeat(aligned_rva_offset as usize),
                                     text
                                 );
                             }
@@ -101,11 +97,8 @@ impl AppView for RawView {
                                 })
                                 .collect::<String>();
                             if index == 0 {
-                                text = format!(
-                                    "{}{}",
-                                    " ".repeat(aligned_address_offset as usize),
-                                    text
-                                );
+                                text =
+                                    format!("{}{}", " ".repeat(aligned_rva_offset as usize), text);
                             }
                             ui.add(Label::new(RichText::from(text).monospace()).wrap(false));
                         });

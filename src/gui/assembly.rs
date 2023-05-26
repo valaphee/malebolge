@@ -15,24 +15,22 @@ use crate::{
 };
 
 pub struct AssemblyView {
-    bitness: u32,
-    address: u64,
+    rva: u64,
     data_range: Range<usize>,
 
-    last_address: u64,
-    addresses: HashSet<u64>,
+    last_rva: u64,
+    rvas: HashSet<u64>,
     rows: Vec<Row>,
     scroll_to_row: Option<usize>,
 }
 
 impl AssemblyView {
-    pub fn new(bitness: u32, address: u64, data_view: DataView) -> Self {
+    pub fn new(address: u64, data_view: DataView) -> Self {
         Self {
-            bitness,
-            address,
+            rva: address,
             data_range: data_view.range,
-            last_address: address,
-            addresses: Default::default(),
+            last_rva: address,
+            rvas: Default::default(),
             rows: Default::default(),
             scroll_to_row: Default::default(),
         }
@@ -41,7 +39,7 @@ impl AssemblyView {
 
 impl AppView for AssemblyView {
     fn title(&self) -> String {
-        format!("Assembly ({:016X})", self.address).into()
+        format!("Assembly ({:016X})", self.rva).into()
     }
 
     fn ui(&mut self, context: &mut AppContext, ui: &mut Ui) {
@@ -66,17 +64,12 @@ impl AppView for AssemblyView {
                     instruction
                 } else {
                     // decode instruction
-                    let address = self.last_address;
-                    let position = (address - self.address) as usize;
-                    let mut decoder = Decoder::with_ip(
-                        self.bitness,
-                        data,
-                        context.project.base() + address,
-                        DecoderOptions::NONE,
-                    );
+                    let rva = self.last_rva;
+                    let position = (rva - self.rva) as usize;
+                    let mut decoder = Decoder::with_ip(64, data, rva, DecoderOptions::NONE);
                     decoder.set_position(position).unwrap();
                     let instruction = decoder.decode();
-                    self.last_address += (decoder.position() - position) as u64;
+                    self.last_rva += (decoder.position() - position) as u64;
 
                     // format instruction
                     let mut row_ = Row::new(
@@ -89,17 +82,17 @@ impl AppView for AssemblyView {
                     );
                     NasmFormatter::new().format(&instruction, &mut row_);
                     row_.post_format(&style);
-                    self.addresses.insert(row_.address);
+                    self.rvas.insert(row_.rva);
                     self.rows.push(row_);
 
                     // validate addresses
                     for instruction in &mut self.rows {
-                        for (text, address) in &mut instruction.instruction {
-                            let Some(address) = address else {
+                        for (text, rva) in &mut instruction.instruction {
+                            let Some(rva) = rva else {
                                 continue;
                             };
-                            if (self.address..self.last_address).contains(address) {
-                                if !self.addresses.contains(address) {
+                            if (self.rva..self.last_rva).contains(rva) {
+                                if !self.rvas.contains(rva) {
                                     text.sections.first_mut().unwrap().format.background =
                                         Color32::DARK_RED;
                                 }
@@ -108,32 +101,28 @@ impl AppView for AssemblyView {
                     }
                     &self.rows[index]
                 };
-                let label = context.project.label_by_rva.get(&instruction.address);
+                let label = context.project.label_by_rva.get(&instruction.rva);
 
                 // address column
                 row.col(|ui| {
                     ui.add(
-                        Label::new(
-                            RichText::from(format!("{:016X}", instruction.address)).monospace(),
-                        )
-                        .wrap(false)
-                        .sense(Sense::click()),
+                        Label::new(RichText::from(format!("{:016X}", instruction.rva)).monospace())
+                            .wrap(false)
+                            .sense(Sense::click()),
                     )
                     .context_menu(|ui| {
                         ui.menu_button("Copy", |ui| {
                             if ui.button("VA").clicked() {
                                 ui.close_menu();
                                 ui.output_mut(|output| {
-                                    output.copied_text = format!("{:016X}", instruction.address)
+                                    output.copied_text =
+                                        format!("{:016X}", context.project.base() + instruction.rva)
                                 });
                             }
                             if ui.button("RVA").clicked() {
                                 ui.close_menu();
                                 ui.output_mut(|output| {
-                                    output.copied_text = format!(
-                                        "{:016X}",
-                                        instruction.address - context.project.base()
-                                    )
+                                    output.copied_text = format!("{:016X}", instruction.rva)
                                 });
                             }
                             if ui.button("Instruction").clicked() {
@@ -159,15 +148,15 @@ impl AppView for AssemblyView {
                 row.col(|ui| {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing = Vec2::ZERO;
-                        for (text, address_with_align_bit) in &instruction.instruction {
-                            if let Some(address) = *address_with_align_bit {
+                        for (text, rva) in &instruction.instruction {
+                            if let Some(rva) = *rva {
                                 if ui
                                     .add(Label::new(text.clone()).sense(Sense::click()))
                                     .clicked()
                                 {
                                     if let Some(row) = self.rows.iter().enumerate().find_map(
                                         |(row, instruction)| {
-                                            if instruction.address == address {
+                                            if instruction.rva == rva {
                                                 Some(row)
                                             } else {
                                                 None
@@ -176,7 +165,7 @@ impl AppView for AssemblyView {
                                     ) {
                                         self.scroll_to_row = Some(row);
                                     } else {
-                                        // TODO context.open_view.push(Box::new())
+                                        context.open_address_view(rva);
                                     }
                                 }
                             } else {
@@ -207,7 +196,7 @@ impl AppView for AssemblyView {
 }
 
 struct Row {
-    address: u64,
+    rva: u64,
     bytes: LayoutJob,
     instruction: Vec<(LayoutJob, Option<u64>)>,
 }
@@ -215,7 +204,7 @@ struct Row {
 impl Row {
     fn new(address: u64, raw: String) -> Self {
         Self {
-            address,
+            rva: address,
             bytes: LayoutJob::simple_singleline(
                 raw.clone(),
                 FontId::default(),

@@ -3,9 +3,8 @@ use egui_dock::egui::Sense;
 use egui_extras::{Column, TableBuilder};
 
 use crate::{
-    gui::{assembly::AssemblyView, raw::RawView, AppContext, AppView},
+    gui::{AppContext, AppView},
     project,
-    project::DataViewType,
 };
 
 #[derive(Default)]
@@ -37,13 +36,12 @@ impl AppView for LabelView {
             })
             .body(|mut body| {
                 for (rva, label) in context.project.label_by_rva.iter() {
-                    let va = context.project.base() + rva;
                     body.row(row_height, |mut row| {
                         // address column
                         row.col(|ui| {
                             if ui
                                 .add(
-                                    Label::new(RichText::from(format!("{:016X}", va)).monospace())
+                                    Label::new(RichText::from(format!("{:016X}", rva)).monospace())
                                         .wrap(false)
                                         .sense(Sense::click()),
                                 )
@@ -52,7 +50,8 @@ impl AppView for LabelView {
                                         if ui.button("VA").clicked() {
                                             ui.close_menu();
                                             ui.output_mut(|output| {
-                                                output.copied_text = format!("{:016X}", va)
+                                                output.copied_text =
+                                                    format!("{:016X}", context.project.base() + rva)
                                             });
                                         }
                                         if ui.button("RVA").clicked() {
@@ -71,18 +70,7 @@ impl AppView for LabelView {
                                 })
                                 .clicked()
                             {
-                                if let Some(data_view) = context.project.data_view(*rva) {
-                                    match data_view.type_ {
-                                        DataViewType::Raw => {
-                                            context
-                                                .open_view
-                                                .push(Box::new(RawView::new(*rva, data_view)));
-                                        }
-                                        DataViewType::Assembly => context
-                                            .open_view
-                                            .push(Box::new(AssemblyView::new(64, *rva, data_view))),
-                                    }
-                                }
+                                context.open_address_view(*rva);
                             }
                         });
 

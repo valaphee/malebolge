@@ -1,10 +1,15 @@
+use std::cell::RefCell;
+
 use eframe::egui::{
     Align, Button, CentralPanel, Context, Frame, Grid, Key, KeyboardShortcut, Layout, Modifiers,
     Ui, Vec2, WidgetText, Window,
 };
 use egui_dock::{DockArea, Node, Tree};
 
-use crate::{gui::label::LabelView, project::Project};
+use crate::{
+    gui::{assembly::AssemblyView, label::LabelView, raw::RawView},
+    project::{DataViewType, Project},
+};
 
 mod assembly;
 mod label;
@@ -12,17 +17,17 @@ mod raw;
 
 #[derive(Default)]
 pub struct App {
-    context: Option<AppContext>,
+    project: Option<Project>,
 
     views: Tree<Box<dyn AppView>>,
     go_to_address_window: Option<GoToAddressWindow>,
 }
 
 impl App {
-    fn open_view(views: &mut Tree<Box<dyn AppView>>, view: Box<dyn AppView>) {
+    fn open_view(&mut self, view: Box<dyn AppView>) {
         let title = view.title();
         if let Some((node_index, tab_index)) =
-            views
+            self.views
                 .iter()
                 .enumerate()
                 .find_map(|(node_index, node)| match node {
@@ -36,30 +41,35 @@ impl App {
                     _ => None,
                 })
         {
-            views.set_focused_node(node_index.into());
-            views.set_active_tab(node_index.into(), tab_index.into());
+            self.views.set_focused_node(node_index.into());
+            self.views
+                .set_active_tab(node_index.into(), tab_index.into());
         } else {
-            views.push_to_first_leaf(view)
+            self.views.push_to_first_leaf(view)
         }
     }
 
-    fn open_label_view(views: &mut Tree<Box<dyn AppView>>) {
-        Self::open_view(views, Box::new(LabelView::default()));
+    fn open_label_view(&mut self) {
+        self.open_view(Box::new(LabelView::default()));
     }
 }
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &Context, frame: &mut eframe::Frame) {
-        if let Some(context) = &mut self.context {
-            CentralPanel::default()
+        if self.project.is_some() {
+            let open_view = CentralPanel::default()
                 .frame(Frame::none())
                 .show(ctx, |ui| {
-                    DockArea::new(&mut self.views).show_inside(ui, context);
+                    let mut context = AppContext {
+                        project: self.project.as_mut().unwrap(),
+                        open_view: RefCell::new(Default::default()),
+                    };
+                    DockArea::new(&mut self.views).show_inside(ui, &mut context);
 
                     // go to address window
                     if let Some(go_to_address_window) = &mut self.go_to_address_window {
-                        if let Some(_address) = go_to_address_window.ui(ui) {
-                            // TODO context.open_view.push(Box::new());
+                        if let Some(address) = go_to_address_window.ui(ui) {
+                            context.open_address_view(address)
                         }
                         if !go_to_address_window.open() {
                             self.go_to_address_window = None;
@@ -73,13 +83,16 @@ impl eframe::App for App {
                     {
                         self.go_to_address_window = Some(Default::default())
                     }
-                });
 
-            while let Some(view) = context.open_view.pop() {
-                App::open_view(&mut self.views, view);
+                    context.open_view.into_inner()
+                })
+                .inner;
+
+            for view in open_view {
+                self.open_view(view);
             }
             if self.views.is_empty() {
-                self.context = None;
+                self.project = None;
             }
         } else {
             CentralPanel::default().show(ctx, |ui| {
@@ -89,8 +102,8 @@ impl eframe::App for App {
                         .clicked()
                     {
                         if let Some(path) = rfd::FileDialog::new().pick_file() {
-                            self.context = Some(AppContext::new(Project::new(path).unwrap()));
-                            Self::open_label_view(&mut self.views);
+                            self.project = Some(Project::new(path).unwrap());
+                            self.open_label_view();
                         };
                     }
                     if ui
@@ -112,22 +125,32 @@ impl eframe::App for App {
     }
 }
 
-struct AppContext {
-    project: Project,
+pub struct AppContext<'a> {
+    pub project: &'a mut Project,
 
-    open_view: Vec<Box<dyn AppView>>,
+    open_view: RefCell<Vec<Box<dyn AppView>>>,
 }
 
-impl AppContext {
-    fn new(project: Project) -> Self {
-        Self {
-            project,
-            open_view: Default::default(),
+impl AppContext<'_> {
+    pub fn open_view(&self, view: Box<dyn AppView>) {
+        self.open_view.borrow_mut().push(view);
+    }
+
+    pub fn open_address_view(&self, rva: u64) {
+        if let Some(data_view) = self.project.data_view(rva) {
+            match data_view.type_ {
+                DataViewType::Raw => {
+                    self.open_view(Box::new(RawView::new(rva, data_view)));
+                }
+                DataViewType::Assembly => {
+                    self.open_view(Box::new(AssemblyView::new(rva, data_view)))
+                }
+            }
         }
     }
 }
 
-impl egui_dock::TabViewer for AppContext {
+impl egui_dock::TabViewer for AppContext<'_> {
     type Tab = Box<dyn AppView>;
 
     fn ui(&mut self, ui: &mut Ui, tab: &mut Self::Tab) {
@@ -139,7 +162,7 @@ impl egui_dock::TabViewer for AppContext {
     }
 }
 
-trait AppView {
+pub trait AppView {
     fn title(&self) -> String;
 
     fn ui(&mut self, context: &mut AppContext, ui: &mut Ui);
