@@ -9,16 +9,12 @@ description = "Reverse-engineering sandbox"
 
 [dependencies]
 anyhow = "1.0.71"
-byteorder = "1.4.3"
-eframe = { version = "0.21.3", default-features = false, features = ["accesskit", "default_fonts", "wgpu", "wayland"] }
-egui_dock = "0.5.0"
-egui_extras = "0.21.0"
+boa_engine = "0.16.0"
+clap = { version = "4.2.7", features = ["derive"] }
 iced-x86 = "1.18.0"
 object = { version = "0.31.1", features = ["all"] }
-pollster = "0.3.0"
 rfd = "0.11.3"
 thiserror = "1.0.40"
-tokio = { version = "1.28.0", features = ["sync"] }
 
 [dependencies.windows]
 version = "0.48.0"
@@ -39,9 +35,3 @@ codegen-units = 1
 
 [target.'cfg(windows)'.build-dependencies]
 winres = "0.1.12"
-
-[patch.crates-io]
-eframe = { git = "https://github.com/valaphee/egui.git" }
-egui = { git = "https://github.com/valaphee/egui.git" }
-egui_extras = { git = "https://github.com/valaphee/egui.git" }
-object = { git = "https://github.com/valaphee/object.git", branch = "amalgam" }

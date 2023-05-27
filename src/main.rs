@@ -1,17 +1,8 @@
-#![feature(int_roundings)]
-#![feature(strict_provenance)]
-#![windows_subsystem = "windows"]
+use clap::Parser;
+use crate::cli::{Command, run};
 
-use crate::gui::App;
+mod cli;
 
-mod asm;
-mod gui;
-mod project;
-
-pub fn main() -> eframe::Result<()> {
-    eframe::run_native(
-        "Malebolge",
-        eframe::NativeOptions::default(),
-        Box::new(|_| Box::new(App::default())),
-    )
+fn main() {
+    run(Command::parse());
 }
