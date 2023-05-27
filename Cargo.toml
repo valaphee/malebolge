@@ -11,6 +11,7 @@ description = "Reverse-engineering sandbox"
 anyhow = "1.0.71"
 boa_engine = "0.16.0"
 clap = { version = "4.2.7", features = ["derive"] }
+colored = "2.0.0"
 iced-x86 = "1.18.0"
 object = { version = "0.31.1", features = ["all"] }
 rfd = "0.11.3"
