@@ -49,7 +49,8 @@ impl AppView for AssemblyView {
             .min_scrolled_height(0.0)
             .max_scroll_height(f32::INFINITY)
             .column(Column::auto())
-            .columns(Column::auto().resizable(true), 2)
+            .columns(Column::auto().resizable(true), 1)
+            .column(Column::auto())
             .column(Column::remainder());
         table_builder = if let Some(row) = self.scroll_to_row {
             self.scroll_to_row = None;
@@ -64,27 +65,29 @@ impl AppView for AssemblyView {
                 let instruction = if let Some(instruction) = self.rows.get(index) {
                     instruction
                 } else {
-                    // decode instruction
                     let rva = self.last_rva;
                     let position = (rva - self.rva) as usize;
                     let mut decoder = Decoder::with_ip(64, data, rva, DecoderOptions::NONE);
                     decoder.set_position(position).unwrap();
-                    let instruction = /*decoder.decode()*/Cfo::new(&mut decoder).next().unwrap();
-                    self.last_rva += (decoder.position() - position) as u64;
+                    while index >= self.rows.len() {
+                        // decode instruction
+                        let instruction = /*decoder.decode()*/Cfo::new(&mut decoder).next().unwrap();
 
-                    // format instruction
-                    let mut row_ = Row::new(
-                        instruction.ip(),
-                        data[position..position + instruction.len()]
-                            .iter()
-                            .map(|&elem| format!("{:02X}", elem))
-                            .collect::<Vec<_>>()
-                            .join(" "),
-                    );
-                    NasmFormatter::new().format(&instruction, &mut row_);
-                    row_.post_format(&style);
-                    self.rvas.insert(row_.rva);
-                    self.rows.push(row_);
+                        // format instruction
+                        let mut row_ = Row::new(
+                            instruction.ip(),
+                            data[position..position + instruction.len()]
+                                .iter()
+                                .map(|&elem| format!("{:02X}", elem))
+                                .collect::<Vec<_>>()
+                                .join(" "),
+                        );
+                        NasmFormatter::new().format(&instruction, &mut row_);
+                        row_.format(&style);
+                        self.rvas.insert(row_.rva);
+                        self.rows.push(row_);
+                    }
+                    self.last_rva += (decoder.position() - position) as u64;
 
                     // validate addresses
                     for instruction in &mut self.rows {
@@ -94,12 +97,12 @@ impl AppView for AssemblyView {
                             };
                             if (self.rva..self.last_rva).contains(rva) {
                                 if !self.rvas.contains(rva) {
-                                    text.sections.first_mut().unwrap().format.background =
-                                        Color32::DARK_RED;
+                                    *text = text.clone().background_color(Color32::DARK_RED);
                                 }
                             }
                         }
                     }
+
                     &self.rows[index]
                 };
                 let label = context.project.label_by_rva.get(&instruction.rva);
@@ -111,33 +114,33 @@ impl AppView for AssemblyView {
                             .wrap(false)
                             .sense(Sense::click()),
                     )
-                    .context_menu(|ui| {
-                        ui.menu_button("Copy", |ui| {
-                            if ui.button("VA").clicked() {
-                                ui.close_menu();
-                                ui.output_mut(|output| {
-                                    output.copied_text =
-                                        format!("{:016X}", context.project.base() + instruction.rva)
-                                });
-                            }
-                            if ui.button("RVA").clicked() {
-                                ui.close_menu();
-                                ui.output_mut(|output| {
-                                    output.copied_text = format!("{:016X}", instruction.rva)
-                                });
-                            }
-                            if ui.button("Instruction").clicked() {
-                                ui.close_menu();
-                                ui.output_mut(|output| {
-                                    output.copied_text = instruction
-                                        .instruction
-                                        .iter()
-                                        .map(|(text, _)| text.text.as_str())
-                                        .collect()
-                                });
-                            }
+                        .context_menu(|ui| {
+                            ui.menu_button("Copy", |ui| {
+                                if ui.button("VA").clicked() {
+                                    ui.close_menu();
+                                    ui.output_mut(|output| {
+                                        output.copied_text =
+                                            format!("{:016X}", context.project.base() + instruction.rva)
+                                    });
+                                }
+                                if ui.button("RVA").clicked() {
+                                    ui.close_menu();
+                                    ui.output_mut(|output| {
+                                        output.copied_text = format!("{:016X}", instruction.rva)
+                                    });
+                                }
+                                if ui.button("Instruction").clicked() {
+                                    ui.close_menu();
+                                    ui.output_mut(|output| {
+                                        output.copied_text = instruction
+                                            .instruction
+                                            .iter()
+                                            .map(|(text, _)| text.text())
+                                            .collect()
+                                    });
+                                }
+                            });
                         });
-                    });
                 });
 
                 // bytes column
@@ -199,7 +202,7 @@ impl AppView for AssemblyView {
 struct Row {
     rva: u64,
     bytes: LayoutJob,
-    instruction: Vec<(LayoutJob, Option<u64>)>,
+    instruction: Vec<(RichText, Option<u64>)>,
 }
 
 impl Row {
@@ -215,7 +218,7 @@ impl Row {
         }
     }
 
-    fn post_format(&mut self, style: &Style) {
+    fn format(&mut self, style: &Style) {
         // bytes column
         let text_format = &mut self.bytes.sections.first_mut().unwrap().format;
         text_format.font_id = TextStyle::Monospace.resolve(style);
@@ -226,19 +229,6 @@ impl Row {
             max_rows: 1,
             ..Default::default()
         };
-
-        // instruction column
-        for (text, _) in &mut self.instruction {
-            let text_format = &mut text.sections.first_mut().unwrap().format;
-            text_format.font_id = TextStyle::Monospace.resolve(style);
-            if text_format.color == Color32::TEMPORARY_COLOR {
-                text_format.color = style.visuals.text_color()
-            }
-            text.wrap = TextWrapping {
-                max_rows: 1,
-                ..Default::default()
-            };
-        }
     }
 }
 
@@ -246,24 +236,16 @@ impl iced_x86::FormatterOutput for Row {
     fn write(&mut self, text: &str, kind: FormatterTextKind) {
         self.instruction.push(match kind {
             FormatterTextKind::LabelAddress | FormatterTextKind::FunctionAddress => (
-                LayoutJob::simple_singleline(
-                    text.to_string(),
-                    FontId::default(),
-                    Color32::TEMPORARY_COLOR,
-                ),
+                RichText::from(text).monospace(),
                 Some(u64::from_str_radix(&text[..text.len() - 1], 16).unwrap()),
             ),
             _ => (
-                LayoutJob::simple_singleline(
-                    text.to_string(),
-                    FontId::default(),
-                    match kind {
-                        FormatterTextKind::Mnemonic => Color32::LIGHT_RED,
-                        FormatterTextKind::Number => Color32::LIGHT_GREEN,
-                        FormatterTextKind::Register => Color32::LIGHT_BLUE,
-                        _ => Color32::WHITE,
-                    },
-                ),
+                RichText::from(text).monospace().color(match kind {
+                    FormatterTextKind::Mnemonic => Color32::LIGHT_RED,
+                    FormatterTextKind::Number => Color32::LIGHT_GREEN,
+                    FormatterTextKind::Register => Color32::LIGHT_BLUE,
+                    _ => Color32::WHITE,
+                }),
                 None,
             ),
         });
