@@ -11,31 +11,25 @@ use object::{Architecture, Object, ObjectSection, SectionKind};
 
 use crate::cli::print_table;
 
-/// View file
 #[derive(Args)]
-pub struct ViewArgs {
-    /// File
+pub struct DumpArgs {
     path: PathBuf,
-    /// Columns
     #[arg(long, required = true, value_delimiter = ',')]
-    columns: Vec<ViewArgsColumn>,
+    columns: Vec<DumpArgsColumn>,
 
-    /// Where
     #[arg(long)]
-    at: String,
-    /// Row limit
+    offset: String,
     #[arg(long)]
     limit: u64,
 
-    /// Format
     #[arg(long, default_value_t = Default::default())]
-    format: ViewArgsFormat,
+    format: DumpArgsFormat,
 }
 
 #[derive(ValueEnum, Clone)]
-pub enum ViewArgsColumn {
-    Index,
-    Offset,
+pub enum DumpArgsColumn {
+    Idx,
+    Off,
     Raw,
 
     // assembly
@@ -45,24 +39,24 @@ pub enum ViewArgsColumn {
 }
 
 #[derive(Default, ValueEnum, Clone)]
-pub enum ViewArgsFormat {
+pub enum DumpArgsFormat {
     Plain,
     #[default]
     Color,
     Boxed,
 }
 
-impl Display for ViewArgsFormat {
+impl Display for DumpArgsFormat {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ViewArgsFormat::Plain => f.write_str("plain"),
-            ViewArgsFormat::Color => f.write_str("color"),
-            ViewArgsFormat::Boxed => f.write_str("boxed"),
+            DumpArgsFormat::Plain => f.write_str("plain"),
+            DumpArgsFormat::Color => f.write_str("color"),
+            DumpArgsFormat::Boxed => f.write_str("boxed"),
         }
     }
 }
 
-pub(super) fn run(args: ViewArgs) {
+pub(super) fn run(args: DumpArgs) {
     let mut address_context = Context::default();
 
     // parse file
@@ -85,11 +79,12 @@ pub(super) fn run(args: ViewArgs) {
     }
     address_context.register_global_property("section", js_section, Attribute::default());
 
-    // evaluate "at" using position context
-    println!("{:?}", address_context.eval(args.at.clone()).unwrap());
-    let at = address_context.eval(args.at).unwrap().as_number().unwrap() as u64;
-
     // find section
+    let at = address_context
+        .eval(args.offset)
+        .unwrap()
+        .as_number()
+        .unwrap() as u64;
     let section = object
         .sections()
         .find(|section| {
@@ -123,18 +118,18 @@ pub(super) fn run(args: ViewArgs) {
                 args.columns
                     .iter()
                     .map(|column| match column {
-                        ViewArgsColumn::Index => format!("{:X}", index),
-                        ViewArgsColumn::Offset => format!("{:X}", instruction.ip() - at),
-                        ViewArgsColumn::Raw => section_data[(instruction.ip() - at) as usize..]
+                        DumpArgsColumn::Idx => format!("{}", index),
+                        DumpArgsColumn::Off => format!("{:X}", instruction.ip() - at),
+                        DumpArgsColumn::Raw => section_data[(instruction.ip() - at) as usize..]
                             [..instruction.len()]
                             .iter()
                             .map(|element| format!("{:02X}", element))
                             .collect::<Vec<_>>()
                             .join(" "),
-                        ViewArgsColumn::Va => format!("{:016X}", instruction.ip()),
-                        ViewArgsColumn::Rva => format!("{:016X}", instruction.ip() - base),
-                        ViewArgsColumn::Asm => {
-                            if matches!(args.format, ViewArgsFormat::Color) {
+                        DumpArgsColumn::Va => format!("{:016X}", instruction.ip()),
+                        DumpArgsColumn::Rva => format!("{:016X}", instruction.ip() - base),
+                        DumpArgsColumn::Asm => {
+                            if matches!(args.format, DumpArgsFormat::Color) {
                                 let mut output = FormatterOutput::default();
                                 asm_formatter.format(&instruction, &mut output);
                                 output.0
@@ -160,9 +155,9 @@ pub(super) fn run(args: ViewArgs) {
                 args.columns
                     .iter()
                     .map(|column| match column {
-                        ViewArgsColumn::Index => format!("{:X}", index),
-                        ViewArgsColumn::Offset => format!("{:X}", index * 16),
-                        ViewArgsColumn::Raw => {
+                        DumpArgsColumn::Idx => format!("{:X}", index),
+                        DumpArgsColumn::Off => format!("{:X}", index * 16),
+                        DumpArgsColumn::Raw => {
                             let mut text = section_data[if index == 0 {
                                 0
                             } else {
@@ -179,8 +174,8 @@ pub(super) fn run(args: ViewArgs) {
                             }
                             text
                         }
-                        ViewArgsColumn::Va => format!("{:X}", (index + aligned_at) * 16),
-                        ViewArgsColumn::Rva => {
+                        DumpArgsColumn::Va => format!("{:X}", (index + aligned_at) * 16),
+                        DumpArgsColumn::Rva => {
                             format!("{:X}", (index + aligned_at) * 16 - base as usize)
                         }
                         _ => todo!(),
@@ -193,25 +188,25 @@ pub(super) fn run(args: ViewArgs) {
     // print table
     if matches!(
         args.format,
-        ViewArgsFormat::Plain | ViewArgsFormat::Color | ViewArgsFormat::Boxed
+        DumpArgsFormat::Plain | DumpArgsFormat::Color | DumpArgsFormat::Boxed
     ) {
         print_table(
             args.columns
                 .iter()
                 .map(|column| {
                     match column {
-                        ViewArgsColumn::Index => "INDEX",
-                        ViewArgsColumn::Offset => "OFFSET",
-                        ViewArgsColumn::Raw => "RAW",
-                        ViewArgsColumn::Asm => "ASSEMBLY",
-                        ViewArgsColumn::Va => "VA",
-                        ViewArgsColumn::Rva => "RVA",
+                        DumpArgsColumn::Idx => "IDX",
+                        DumpArgsColumn::Off => "OFF",
+                        DumpArgsColumn::Raw => "RAW",
+                        DumpArgsColumn::Asm => "ASM",
+                        DumpArgsColumn::Va => "VA",
+                        DumpArgsColumn::Rva => "RVA",
                     }
                     .to_string()
                 })
                 .collect(),
             rows,
-            matches!(args.format, ViewArgsFormat::Boxed),
+            matches!(args.format, DumpArgsFormat::Boxed),
         );
     }
 }

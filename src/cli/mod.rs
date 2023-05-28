@@ -1,17 +1,20 @@
 use clap::Parser;
 
-use crate::cli::view::ViewArgs;
+use crate::cli::{dump::DumpArgs, info::InfoArgs};
 
-pub mod view;
+pub mod dump;
+mod info;
 
 #[derive(Parser)]
 pub enum Command {
-    View(ViewArgs),
+    Info(InfoArgs),
+    Dump(DumpArgs),
 }
 
 pub fn run(command: Command) {
     match command {
-        Command::View(args) => view::run(args),
+        Command::Info(args) => info::run(args),
+        Command::Dump(args) => dump::run(args),
     }
 }
 
