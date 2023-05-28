@@ -1,6 +1,6 @@
 use std::{fmt::Display, path::PathBuf};
 
-use boa_engine::{object::JsMap, prelude::*, property::Attribute};
+use boa_engine::{prelude::*, property::Attribute};
 use clap::{Args, ValueEnum};
 use colored::Colorize;
 use iced_x86::{
@@ -13,17 +13,16 @@ use crate::cli::print_table;
 
 #[derive(Args)]
 pub struct DumpArgs {
-    path: PathBuf,
     #[arg(long, required = true, value_delimiter = ',')]
-    columns: Vec<DumpArgsColumn>,
+    pub columns: Vec<DumpArgsColumn>,
 
     #[arg(long)]
-    offset: String,
+    pub offset: String,
     #[arg(long)]
-    limit: u64,
+    pub limit: u64,
 
     #[arg(long, default_value_t = Default::default())]
-    format: DumpArgsFormat,
+    pub format: DumpArgsFormat,
 }
 
 #[derive(ValueEnum, Clone)]
@@ -56,11 +55,11 @@ impl Display for DumpArgsFormat {
     }
 }
 
-pub(super) fn run(args: DumpArgs) {
+pub(super) fn run(path: PathBuf, args: DumpArgs) {
     let mut address_context = Context::default();
 
     // parse file
-    let data = std::fs::read(args.path).unwrap();
+    let data = std::fs::read(path).unwrap();
     let object = object::read::File::parse(data.as_slice()).unwrap();
     let base = object.relative_address_base();
     // ...and fill in address context
@@ -139,7 +138,6 @@ pub(super) fn run(args: DumpArgs) {
                                 output
                             }
                         }
-                        _ => todo!(),
                     })
                     .collect::<Vec<_>>()
             })

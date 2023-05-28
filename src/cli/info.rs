@@ -1,37 +1,16 @@
 use std::path::PathBuf;
 
-use clap::Args;
 use object::{
     pe::{ImageDosHeader, ImageNtHeaders32, ImageNtHeaders64},
     read::pe::{ImageNtHeaders, RichHeaderInfo},
     FileKind, LittleEndian,
 };
 
-use crate::cli::print_table;
-
-#[derive(Args)]
-pub struct InfoArgs {
-    path: PathBuf,
-}
-
-pub(super) fn run(args: InfoArgs) {
-    let data = std::fs::read(args.path).unwrap();
+pub(super) fn run(path: PathBuf) {
+    let data = std::fs::read(path).unwrap();
     match FileKind::parse(data.as_slice()).unwrap() {
-        FileKind::Archive => {}
-        FileKind::Coff => {}
-        FileKind::CoffBig => {}
-        FileKind::DyldCache => {}
-        FileKind::Elf32 => {}
-        FileKind::Elf64 => {}
-        FileKind::MachO32 => {}
-        FileKind::MachO64 => {}
-        FileKind::MachOFat32 => {}
-        FileKind::MachOFat64 => {}
         FileKind::Pe32 => print_pe::<ImageNtHeaders32>(data.as_slice()),
         FileKind::Pe64 => print_pe::<ImageNtHeaders64>(data.as_slice()),
-        FileKind::Wasm => {}
-        FileKind::Xcoff32 => {}
-        FileKind::Xcoff64 => {}
         _ => {}
     }
 }
@@ -69,6 +48,6 @@ fn print_pe<NtHeaders: ImageNtHeaders>(data: &[u8]) {
     }
 
     let mut nt_headers_offset = dos_header.nt_headers_offset() as u64;
-    let (nt_headers,) = NtHeaders::parse(data, &mut nt_headers_offset).unwrap();
+    let (nt_headers, data_directories) = NtHeaders::parse(data, &mut nt_headers_offset).unwrap();
     println!("NT Headers");
 }

@@ -1,9 +1,12 @@
+extern crate core;
+
 use clap::Parser;
 
-use crate::cli::{run, Command};
+use crate::cli::{run, Args};
 
 mod cli;
+mod dbg;
 
 fn main() {
-    run(Command::parse());
+    run(Args::parse());
 }

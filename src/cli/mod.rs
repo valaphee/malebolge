@@ -1,20 +1,33 @@
-use clap::Parser;
+use std::path::PathBuf;
 
-use crate::cli::{dump::DumpArgs, info::InfoArgs};
+use clap::{Parser, Subcommand};
 
-pub mod dump;
+use crate::cli::{dbg::DbgArgs, dump::DumpArgs};
+
+mod dbg;
+mod dump;
 mod info;
 
 #[derive(Parser)]
+pub struct Args {
+    path: PathBuf,
+
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Subcommand)]
 pub enum Command {
-    Info(InfoArgs),
+    Dbg(DbgArgs),
+    Info,
     Dump(DumpArgs),
 }
 
-pub fn run(command: Command) {
-    match command {
-        Command::Info(args) => info::run(args),
-        Command::Dump(args) => dump::run(args),
+pub fn run(args: Args) {
+    match args.command {
+        Command::Dbg(cmd_args) => dbg::run(args.path, cmd_args),
+        Command::Info => info::run(args.path),
+        Command::Dump(cmd_args) => dump::run(args.path, cmd_args),
     }
 }
 
