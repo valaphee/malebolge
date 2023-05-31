@@ -1,3 +1,7 @@
+[workspace]
+members = ["dbg"]
+resolver = "2"
+
 [package]
 name = "malebolge"
 version = "0.0.0"
@@ -13,8 +17,8 @@ boa_engine = "0.16.0"
 clap = { version = "4.2.7", features = ["derive"] }
 colored = "2.0.0"
 iced-x86 = "1.18.0"
+malebolge-dbg = { path = "dbg" }
 object = { version = "0.31.1", features = ["all"] }
-rfd = "0.11.3"
 thiserror = "1.0.40"
 
 [dependencies.windows]
@@ -23,11 +27,14 @@ features = [
     "Win32_Foundation",
     "Win32_Security",
     "Win32_System_Diagnostics_Debug",
-    "Win32_System_Kernel",
+    "Win32_System_LibraryLoader",
     "Win32_System_Memory",
-    "Win32_System_ProcessStatus",
-    "Win32_System_Threading"
+    "Win32_System_Threading",
 ]
+
+[[bin]]
+name = "mbg"
+path = "src/main.rs"
 
 [profile.release]
 strip = true

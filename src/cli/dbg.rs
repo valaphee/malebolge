@@ -1,25 +1,22 @@
-use std::path::PathBuf;
+use std::{net::UdpSocket, path::PathBuf, time::Duration};
 
 use clap::{Args, Parser};
 use windows::{
     core::{HSTRING, PCWSTR, PWSTR},
-    Win32::{
-        Foundation::DBG_CONTINUE,
-        System::{
-            Diagnostics::Debug::{
-                ContinueDebugEvent, WaitForDebugEvent, CREATE_PROCESS_DEBUG_EVENT, DEBUG_EVENT,
-            },
-            Threading::{
-                CreateProcessW, DEBUG_ONLY_THIS_PROCESS, DEBUG_PROCESS, INFINITE,
-                PROCESS_INFORMATION, STARTUPINFOW,
-            },
+    Win32::System::{
+        Diagnostics::Debug::RemoveVectoredExceptionHandler,
+        Memory::{VirtualAllocEx, MEM_COMMIT, PAGE_EXECUTE_READWRITE},
+        Threading::{
+            CreateProcessW, CreateRemoteThread, OpenProcess, ResumeThread, CREATE_SUSPENDED,
+            PROCESS_INFORMATION, PROCESS_VM_OPERATION, PROCESS_VM_READ, PROCESS_VM_WRITE,
+            STARTUPINFOW, THREAD_CREATE_SUSPENDED,
         },
     },
 };
 
 use crate::{
-    cli::{dump, dump::DumpArgs, info},
-    dbg::peb,
+    cli::{dump, dump::DumpArgs},
+    dbg::load_library,
 };
 
 #[derive(Args)]
@@ -29,16 +26,22 @@ pub struct DbgArgs {
 
 #[derive(Parser)]
 pub enum DbgCommand {
-    Exit,
-    Info,
+    Quit,
     Dump(DumpArgs),
 }
 
 #[allow(mutable_transmutes)]
 pub(super) fn run(path: PathBuf, args: DbgArgs) {
-    {
-        let path = path.clone();
-        std::thread::spawn(move || unsafe {
+    let process;
+    unsafe {
+        if let Some(pid) = args.pid {
+            process = OpenProcess(
+                PROCESS_VM_OPERATION | PROCESS_VM_READ | PROCESS_VM_WRITE,
+                false,
+                pid,
+            )
+            .unwrap();
+        } else {
             let mut si = STARTUPINFOW::default();
             let mut pi = PROCESS_INFORMATION::default();
             CreateProcessW(
@@ -47,7 +50,7 @@ pub(super) fn run(path: PathBuf, args: DbgArgs) {
                 None,
                 None,
                 false,
-                DEBUG_PROCESS | DEBUG_ONLY_THIS_PROCESS,
+                CREATE_SUSPENDED,
                 None,
                 PCWSTR::null(),
                 &mut si,
@@ -55,20 +58,24 @@ pub(super) fn run(path: PathBuf, args: DbgArgs) {
             )
             .ok()
             .unwrap();
+            process = pi.hProcess;
 
-            let mut event = DEBUG_EVENT::default();
+            let socket = UdpSocket::bind("127.0.0.1:13371").unwrap();
+
+            load_library(
+                pi.hProcess,
+                "C:\\Users\\valaphee\\CLionProjects\\malebolge\\target\\debug\\mbg.dll",
+            )
+            .unwrap();
+
+            ResumeThread(pi.hThread);
+
             loop {
-                WaitForDebugEvent(&mut event, INFINITE).ok().unwrap();
-                match event.dwDebugEventCode {
-                    CREATE_PROCESS_DEBUG_EVENT => {
-                        let _event_info = event.u.CreateProcessInfo;
-                        peb::hide_debugger(pi.hProcess);
-                    }
-                    _ => {}
-                }
-                ContinueDebugEvent(event.dwProcessId, event.dwThreadId, DBG_CONTINUE);
+                let mut buffer = [0u8; 256];
+                socket.recv(&mut buffer).unwrap();
+                println!("{:?}", buffer);
             }
-        });
+        };
     }
 
     let mut input = String::new();
@@ -76,11 +83,8 @@ pub(super) fn run(path: PathBuf, args: DbgArgs) {
         std::io::stdin().read_line(&mut input).unwrap();
         match DbgCommand::try_parse_from(std::iter::once("").chain(input.trim().split(' '))) {
             Ok(value) => match value {
-                DbgCommand::Exit => {
+                DbgCommand::Quit => {
                     break;
-                }
-                DbgCommand::Info => {
-                    info::run(path.clone());
                 }
                 DbgCommand::Dump(dbg_args) => {
                     dump::run(path.clone(), dbg_args);

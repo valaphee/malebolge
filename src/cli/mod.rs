@@ -6,7 +6,6 @@ use crate::cli::{dbg::DbgArgs, dump::DumpArgs};
 
 mod dbg;
 mod dump;
-mod info;
 
 #[derive(Parser)]
 pub struct Args {
@@ -18,16 +17,14 @@ pub struct Args {
 
 #[derive(Subcommand)]
 pub enum Command {
-    Dbg(DbgArgs),
-    Info,
     Dump(DumpArgs),
+    Dbg(DbgArgs),
 }
 
 pub fn run(args: Args) {
     match args.command {
-        Command::Dbg(cmd_args) => dbg::run(args.path, cmd_args),
-        Command::Info => info::run(args.path),
         Command::Dump(cmd_args) => dump::run(args.path, cmd_args),
+        Command::Dbg(cmd_args) => dbg::run(args.path, cmd_args),
     }
 }
 

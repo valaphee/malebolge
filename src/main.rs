@@ -1,4 +1,4 @@
-extern crate core;
+#![feature(int_roundings)]
 
 use clap::Parser;
 
