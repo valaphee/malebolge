@@ -1,34 +1,61 @@
-use std::path::PathBuf;
+use std::{io::Write, path::PathBuf, str::FromStr};
 
-use clap::{Parser, Subcommand};
+use clap::Parser;
+use object::Object;
 
-use crate::cli::{dbg::DbgArgs, dump::DumpArgs};
+use crate::{
+    cli::{address::Address, dump::DumpArgs},
+    ctx::Module,
+};
 
-mod dbg;
+mod address;
 mod dump;
 
 #[derive(Parser)]
 pub struct Args {
     path: PathBuf,
-
-    #[command(subcommand)]
-    command: Command,
 }
 
-#[derive(Subcommand)]
+#[derive(Parser)]
 pub enum Command {
+    Quit,
+    Break { address: Address },
+    Continue { count: usize },
+    Next { count: usize },
+    Step { count: usize },
     Dump(DumpArgs),
-    Dbg(DbgArgs),
 }
 
 pub fn run(args: Args) {
-    match args.command {
-        Command::Dump(cmd_args) => dump::run(args.path, cmd_args),
-        Command::Dbg(cmd_args) => dbg::run(args.path, cmd_args),
+    let mut input = String::new();
+    loop {
+        print!("> ");
+        std::io::stdout().flush().unwrap();
+        std::io::stdin().read_line(&mut input).unwrap();
+        match Command::try_parse_from(std::iter::once("").chain(input.trim().split(' '))) {
+            Ok(value) => match value {
+                Command::Quit => {
+                    break;
+                }
+                Command::Break { address } => {}
+                Command::Continue { count } => {}
+                Command::Next { count } => {}
+                Command::Step { count } => {}
+                Command::Dump(args) => {
+                    dump::run(args);
+                }
+            },
+            Err(error) => {
+                let _ = error.print();
+            }
+        }
+        input.clear();
+        println!();
+        std::io::stdout().flush().unwrap();
     }
 }
 
-pub fn print_table(columns: Vec<String>, rows: Vec<Vec<String>>, pretty: bool) {
+pub fn print_table(columns: Vec<String>, rows: Vec<Vec<String>>, box_drawing: bool) {
     let mut column_widths = columns
         .iter()
         .map(|column| column.len())
@@ -42,7 +69,7 @@ pub fn print_table(columns: Vec<String>, rows: Vec<Vec<String>>, pretty: bool) {
         }
     }
 
-    if pretty {
+    if box_drawing {
         println!(
             "╔{}╗",
             columns

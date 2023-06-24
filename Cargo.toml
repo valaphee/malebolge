@@ -1,46 +1,23 @@
-[workspace]
-members = ["dbg"]
-resolver = "2"
-
 [package]
-name = "malebolge"
+name = "catwash"
 version = "0.0.0"
 edition = "2021"
 authors = ["Valaphee <iam@valaphee.com>"]
 license = "Apache-2.0"
-repository = "https://github.com/valaphee/malebolge.git"
+repository = "https://github.com/valaphee/catwash.git"
 description = "Reverse-engineering sandbox"
 
 [dependencies]
 anyhow = "1.0.71"
-boa_engine = "0.16.0"
 clap = { version = "4.2.7", features = ["derive"] }
 colored = "2.0.0"
-iced-x86 = "1.18.0"
-malebolge-dbg = { path = "dbg" }
-object = { version = "0.31.1", features = ["all"] }
 thiserror = "1.0.40"
 
-[dependencies.windows]
-version = "0.48.0"
-features = [
-    "Win32_Foundation",
-    "Win32_Security",
-    "Win32_System_Diagnostics_Debug",
-    "Win32_System_LibraryLoader",
-    "Win32_System_Memory",
-    "Win32_System_Threading",
-]
-
-[[bin]]
-name = "mbg"
-path = "src/main.rs"
+iced-x86 = "1.18.0"
+object = { version = "0.31.1", features = ["all"] }
 
 [profile.release]
 strip = true
 lto = true
 panic = "abort"
 codegen-units = 1
-
-[target.'cfg(windows)'.build-dependencies]
-winres = "0.1.12"

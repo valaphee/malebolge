@@ -24,9 +24,9 @@ jobs:
       matrix:
         include:
           #- os: ubuntu-latest
-          #  artifact_name: amalgam
+          #  artifact_name: catwash
           - os: windows-latest
-            artifact_name: amalgam.exe
+            artifact_name: catwash.exe
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v2

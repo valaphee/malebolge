@@ -1,12 +1,10 @@
-#![feature(int_roundings)]
-
 use clap::Parser;
 
-use crate::cli::{run, Args};
+use crate::cli::Args;
 
 mod cli;
-mod dbg;
+mod ctx;
 
 fn main() {
-    run(Args::parse());
+    cli::run(Args::parse())
 }
