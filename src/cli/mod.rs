@@ -2,7 +2,7 @@ use std::{io::Write, path::PathBuf};
 
 use clap::Parser;
 
-use crate::{cli::address::Address};
+use crate::{cli::address::Address, win::process::Process};
 
 mod address;
 
@@ -13,18 +13,31 @@ pub struct Args {
 
 #[derive(Parser)]
 pub enum Command {
+    #[command(alias = "q")]
     Quit,
+    #[command(alias = "g")]
     Go { address: Address },
+    #[command(alias = "b")]
     Break { address: Address },
+    #[command(alias = "c")]
     Continue { count: usize },
+    #[command(alias = "n")]
     Next { count: usize },
+    #[command(alias = "s")]
     Step { count: usize },
+    #[command(alias = "lm")]
+    ListModules,
+    #[command(alias = "ls")]
+    ListSymbols,
 }
 
 pub fn run(args: Args) {
+    let process = Process::new(args.path);
+    let mut current_address = 0;
+
     let mut input = String::new();
     loop {
-        print!("> ");
+        print!("{:016X}> ", current_address);
         std::io::stdout().flush().unwrap();
         std::io::stdin().read_line(&mut input).unwrap();
         match Command::try_parse_from(std::iter::once("").chain(input.trim().split(' '))) {
@@ -32,11 +45,26 @@ pub fn run(args: Args) {
                 Command::Quit => {
                     break;
                 }
-                Command::Break { address } => {}
-                Command::Continue { count } => {}
-                Command::Next { count } => {}
-                Command::Step { count } => {}
-                Command::Go { address } => {}
+                Command::Go { address } => {
+                    current_address = address.to_raw(&process).unwrap();
+                }
+                Command::Break { address: _ } => {}
+                Command::Continue { count: _ } => {}
+                Command::Next { count: _ } => {}
+                Command::Step { count: _ } => {}
+                Command::ListModules => {
+                    for (module_name, module) in process.modules() {
+                        println!("{}: {:016X} {:016X}", module_name, module.base(), module.size())
+                    }
+                }
+                Command::ListSymbols => {
+                    for (module_name, module) in process.modules() {
+                        println!("{}:", module_name);
+                        for (symbol_name, symbol) in module.symbols() {
+                            println!("\t{}: {:016X}", symbol_name, symbol);
+                        }
+                    }
+                }
             },
             Err(error) => {
                 let _ = error.print();
@@ -45,88 +73,5 @@ pub fn run(args: Args) {
         input.clear();
         println!();
         std::io::stdout().flush().unwrap();
-    }
-}
-
-pub fn print_table(columns: Vec<String>, rows: Vec<Vec<String>>, box_drawing: bool) {
-    let mut column_widths = columns
-        .iter()
-        .map(|column| column.len())
-        .collect::<Vec<_>>();
-    for row in rows.iter() {
-        for (column_index, cell) in row.iter().enumerate() {
-            let cell_width = cell.len();
-            if column_widths[column_index] < cell_width {
-                column_widths[column_index] = cell_width;
-            }
-        }
-    }
-
-    if box_drawing {
-        println!(
-            "╔{}╗",
-            columns
-                .iter()
-                .enumerate()
-                .map(|(column_index, column)| format!(
-                    "{:═^1$}",
-                    format!(" {} ", column),
-                    column_widths[column_index] + 2
-                ))
-                .collect::<Vec<_>>()
-                .join("╤")
-        );
-        for row in rows {
-            println!(
-                "║ {} ║",
-                row.iter()
-                    .enumerate()
-                    .map(|(column_index, cell)| format!(
-                        "{:<1$}",
-                        cell, column_widths[column_index]
-                    ))
-                    .collect::<Vec<_>>()
-                    .join(" │ ")
-            );
-        }
-        println!(
-            "╚{}╝",
-            columns
-                .iter()
-                .enumerate()
-                .map(|(column_index, column)| format!(
-                    "{:═^1$}",
-                    format!(" {} ", column),
-                    column_widths[column_index] + 2
-                ))
-                .collect::<Vec<_>>()
-                .join("╧")
-        );
-    } else {
-        println!(
-            "{}",
-            columns
-                .iter()
-                .enumerate()
-                .map(|(column_index, column)| format!(
-                    "{:<1$}",
-                    format!("{}", column),
-                    column_widths[column_index]
-                ))
-                .collect::<Vec<_>>()
-                .join(" ")
-        );
-        for row in rows {
-            println!(
-                "{}",
-                row.iter()
-                    .enumerate()
-                    .map(|(column_index, cell)| {
-                        format!("{:<1$}", cell, column_widths[column_index])
-                    })
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            );
-        }
     }
 }

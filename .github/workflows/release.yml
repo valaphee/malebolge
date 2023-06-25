@@ -24,7 +24,7 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            artifact_name: catwash.exe
+            artifact_name: malebolge.exe
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v2

@@ -9,21 +9,23 @@ use windows::{
             Kernel::STRING,
             Threading::{
                 CreateProcessW, NtQueryInformationProcess, ProcessBasicInformation,
-                CREATE_SUSPENDED, PEB_LDR_DATA, PPS_POST_PROCESS_INIT_ROUTINE,
+                TerminateProcess, CREATE_SUSPENDED, PEB_LDR_DATA, PPS_POST_PROCESS_INIT_ROUTINE,
                 PROCESS_BASIC_INFORMATION, PROCESS_INFORMATION, STARTUPINFOW,
             },
         },
     },
 };
+use windows::Win32::Foundation::CloseHandle;
 
-use crate::win::module::ModuleView;
+use crate::win::module::Module;
 
-#[derive(Copy, Clone)]
-pub struct ProcessView {
+pub struct Process {
     handle: HANDLE,
+
+    base_module_name: String,
 }
 
-impl ProcessView {
+impl Process {
     pub fn new(path: impl AsRef<Path>) -> Self {
         unsafe {
             let startup_info = STARTUPINFOW::default();
@@ -43,30 +45,56 @@ impl ProcessView {
             .ok()
             .unwrap();
 
+
             Self {
                 handle: process_info.hProcess,
+                base_module_name: path.as_ref().file_name().unwrap().to_str().unwrap().to_string()
             }
         }
     }
 
-    pub fn module(&self, name: Option<String>) -> Option<ModuleView> {
+    pub fn modules(&self) -> Vec<(String, Module)> {
+        vec![(self.base_module_name.clone(), unsafe {
+            let mut pbi = PROCESS_BASIC_INFORMATION::default();
+            NtQueryInformationProcess(
+                self.handle,
+                ProcessBasicInformation,
+                std::ptr::addr_of_mut!(pbi) as *mut _,
+                std::mem::size_of_val(&pbi) as u32,
+                &mut 0,
+            )
+                .unwrap();
+            let mut peb = std::mem::zeroed::<PEB>();
+            ReadProcessMemory(
+                self.handle,
+                pbi.PebBaseAddress as *mut _,
+                std::ptr::addr_of_mut!(peb) as *mut _,
+                std::mem::size_of_val(&peb),
+                None,
+            )
+                .ok()
+                .unwrap();
+            Module::new(self.handle, peb.ImageBaseAddress)
+        })]
+    }
+
+    pub fn module(&self, name: Option<String>) -> Option<Module> {
         if let Some(_name) = name {
             None
         } else {
             unsafe {
                 let mut pbi = PROCESS_BASIC_INFORMATION::default();
                 NtQueryInformationProcess(
-                    process_info.hProcess,
+                    self.handle,
                     ProcessBasicInformation,
                     std::ptr::addr_of_mut!(pbi) as *mut _,
                     std::mem::size_of_val(&pbi) as u32,
                     &mut 0,
                 )
                 .unwrap();
-
                 let mut peb = std::mem::zeroed::<PEB>();
                 ReadProcessMemory(
-                    process_info.hProcess,
+                    self.handle,
                     pbi.PebBaseAddress as *mut _,
                     std::ptr::addr_of_mut!(peb) as *mut _,
                     std::mem::size_of_val(&peb),
@@ -74,9 +102,17 @@ impl ProcessView {
                 )
                 .ok()
                 .unwrap();
-
-                Some(ModuleView::new(self.handle, peb.ImageBaseAddress))
+                Some(Module::new(self.handle, peb.ImageBaseAddress))
             }
+        }
+    }
+}
+
+impl Drop for Process {
+    fn drop(&mut self) {
+        unsafe {
+            TerminateProcess(self.handle, 0).ok().unwrap();
+            CloseHandle(self.handle);
         }
     }
 }

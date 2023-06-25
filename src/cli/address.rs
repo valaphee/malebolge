@@ -1,3 +1,5 @@
+use crate::win::process::Process;
+
 #[derive(Clone)]
 pub struct Address {
     module: Option<String>,
@@ -6,14 +8,20 @@ pub struct Address {
 }
 
 impl Address {
-    pub fn to_raw(self) -> u64 {
-        let base = self.module.map_or(0, |module_name| 0);
-        let symbol = self
-            .symbol
-            .map_or(0, |symbol| match symbol.to_lowercase().as_str() {
-                _ => todo!(),
-            });
-        base + symbol + self.offset as u64
+    pub fn to_raw(self, process: &Process) -> Option<usize> {
+        let Some(module) = process.module(self.module) else {
+            return None;
+        };
+        Some(
+            if let Some(symbol) = self.symbol {
+                let Some(symbol) = module.symbol(symbol.as_str()) else {
+                    return None;
+                };
+                symbol
+            } else {
+                module.base()
+            } + self.offset,
+        )
     }
 }
 
@@ -42,7 +50,7 @@ impl From<&str> for Address {
         };
         let offset = symbol_and_offset
             .next()
-            .map(|offset| offset.parse::<usize>().unwrap())
+            .map(|offset| offset.parse().unwrap())
             .unwrap_or(0);
         Self {
             module,
