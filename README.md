@@ -10,6 +10,7 @@ Reverse-engineering sandbox
 | Syntax                                     | Description |
 |--------------------------------------------|-------------|
 | q/quit                                     | Quit        |
+| go <address>                               | Go to       |
 | b/break <address>                          | Break at    |
 | c/continue \[count]                        | Continue    |
 | n/next \[count]                            | Step over   |

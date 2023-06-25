@@ -1,15 +1,10 @@
-use std::{io::Write, path::PathBuf, str::FromStr};
+use std::{io::Write, path::PathBuf};
 
 use clap::Parser;
-use object::Object;
 
-use crate::{
-    cli::{address::Address, dump::DumpArgs},
-    ctx::Module,
-};
+use crate::{cli::address::Address};
 
 mod address;
-mod dump;
 
 #[derive(Parser)]
 pub struct Args {
@@ -19,11 +14,11 @@ pub struct Args {
 #[derive(Parser)]
 pub enum Command {
     Quit,
+    Go { address: Address },
     Break { address: Address },
     Continue { count: usize },
     Next { count: usize },
     Step { count: usize },
-    Dump(DumpArgs),
 }
 
 pub fn run(args: Args) {
@@ -41,9 +36,7 @@ pub fn run(args: Args) {
                 Command::Continue { count } => {}
                 Command::Next { count } => {}
                 Command::Step { count } => {}
-                Command::Dump(args) => {
-                    dump::run(args);
-                }
+                Command::Go { address } => {}
             },
             Err(error) => {
                 let _ = error.print();

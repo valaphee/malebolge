@@ -3,7 +3,7 @@ use clap::Parser;
 use crate::cli::Args;
 
 mod cli;
-mod ctx;
+mod win;
 
 fn main() {
     cli::run(Args::parse())

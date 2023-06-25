@@ -1,10 +1,20 @@
-use std::str::FromStr;
-
 #[derive(Clone)]
 pub struct Address {
     module: Option<String>,
     symbol: Option<String>,
     offset: usize,
+}
+
+impl Address {
+    pub fn to_raw(self) -> u64 {
+        let base = self.module.map_or(0, |module_name| 0);
+        let symbol = self
+            .symbol
+            .map_or(0, |symbol| match symbol.to_lowercase().as_str() {
+                _ => todo!(),
+            });
+        base + symbol + self.offset as u64
+    }
 }
 
 impl From<&str> for Address {
@@ -16,7 +26,11 @@ impl From<&str> for Address {
             module = None;
             symbol_and_offset = module_and_symbol_and_offset[0]
         } else {
-            module = Some(module_and_symbol_and_offset[0].to_owned());
+            module = if module_and_symbol_and_offset[0].is_empty() {
+                None
+            } else {
+                Some(module_and_symbol_and_offset[0].to_owned())
+            };
             symbol_and_offset = module_and_symbol_and_offset[1]
         }
         let mut symbol_and_offset = symbol_and_offset.splitn(2, '+');
