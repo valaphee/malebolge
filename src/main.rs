@@ -1,4 +1,5 @@
 #![feature(try_blocks)]
+#![feature(int_roundings)]
 
 use clap::Parser;
 

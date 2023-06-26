@@ -62,10 +62,12 @@ impl Module {
 
     /// searches for a module with the specified name, if the name is None the
     /// image module will be returned
-    pub fn by_name(process: HANDLE, name: String) -> Self {
+    pub fn by_name(process: HANDLE, name: String) -> Option<Self> {
         unsafe {
-            let module = GetModuleHandleW(&HSTRING::from(name)).unwrap();
-            Self::from_handle(process, module)
+            let Ok(module) = GetModuleHandleW(&HSTRING::from(name)) else {
+                return None;
+            };
+            Some(Self::from_handle(process, module))
         }
     }
 

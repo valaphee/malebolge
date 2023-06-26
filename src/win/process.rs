@@ -6,7 +6,7 @@ use windows::{
     Win32::{
         Foundation::{CloseHandle, FALSE, HANDLE, UNICODE_STRING},
         System::{
-            Diagnostics::Debug::WriteProcessMemory,
+            Diagnostics::Debug::{ReadProcessMemory, WriteProcessMemory},
             Kernel::STRING,
             LibraryLoader::{GetModuleHandleA, GetProcAddress},
             Memory::{VirtualAllocEx, MEM_COMMIT, MEM_RESERVE, PAGE_READWRITE},
@@ -71,10 +71,26 @@ impl Process {
     /// searches for a module with the specified name, if the name is None the
     /// image module will be returned
     pub fn module(&self, name: Option<String>) -> Option<Module> {
-        Some(Module::by_name(
-            self.process,
-            name.unwrap_or(self.name.clone()),
-        ))
+        let Some(name) = name else {
+            return Some(Module::from_peb(self.process));
+        };
+        Module::by_name(self.process, name)
+    }
+
+    pub fn read(&self, address: usize, length: usize) -> Vec<u8> {
+        let mut data = vec![0; length];
+        unsafe {
+            ReadProcessMemory(
+                self.process,
+                address as *mut _,
+                data.as_mut_ptr() as *mut _,
+                data.len(),
+                None,
+            )
+            .ok()
+            .unwrap();
+        }
+        data
     }
 
     /// loads a library into the process
