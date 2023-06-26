@@ -27,12 +27,14 @@ use crate::win::process::PEB;
 
 pub struct Module {
     process: HANDLE,
+
     name: String,
     base: *mut std::ffi::c_void,
     size: usize,
 }
 
 impl Module {
+    /// all known modules
     pub fn all(process: HANDLE) -> Vec<Self> {
         let mut result = vec![];
         unsafe {
@@ -49,50 +51,26 @@ impl Module {
             {
                 for &module in &modules[..modules_length as usize / std::mem::size_of::<HMODULE>()]
                 {
-                    result.push(Self::new(process, module))
+                    result.push(Self::from_handle(process, module))
                 }
             } else {
-                result.push(Self::new_image(process))
+                result.push(Self::from_peb(process))
             }
         }
         result
     }
 
+    /// searches for a module with the specified name, if the name is None the
+    /// image module will be returned
     pub fn by_name(process: HANDLE, name: String) -> Self {
         unsafe {
             let module = GetModuleHandleW(&HSTRING::from(name)).unwrap();
-            Self::new(process, module)
+            Self::from_handle(process, module)
         }
     }
 
-    pub fn new(process: HANDLE, module: HMODULE) -> Self {
-        unsafe {
-            let mut module_name = [0; MAX_PATH as usize];
-            GetModuleBaseNameW(process, module, &mut module_name);
-            let module_name =
-                OsString::from_wide(module_name.split(|&elem| elem == 0).next().unwrap())
-                    .into_string()
-                    .ok()
-                    .unwrap();
-            let mut module_info = MODULEINFO::default();
-            GetModuleInformation(
-                process,
-                module,
-                &mut module_info,
-                std::mem::size_of_val(&module_info) as u32,
-            )
-            .ok()
-            .unwrap();
-            Self {
-                process,
-                name: module_name,
-                base: module_info.lpBaseOfDll,
-                size: module_info.SizeOfImage as usize,
-            }
-        }
-    }
-
-    pub fn new_image(process: HANDLE) -> Self {
+    /// module from PEB
+    pub fn from_peb(process: HANDLE) -> Self {
         unsafe {
             let mut pbi = PROCESS_BASIC_INFORMATION::default();
             NtQueryInformationProcess(
@@ -129,18 +107,51 @@ impl Module {
         }
     }
 
+    /// module from handle
+    pub fn from_handle(process: HANDLE, module: HMODULE) -> Self {
+        unsafe {
+            let mut module_name = [0; MAX_PATH as usize];
+            GetModuleBaseNameW(process, module, &mut module_name);
+            let module_name =
+                OsString::from_wide(module_name.split(|&elem| elem == 0).next().unwrap())
+                    .into_string()
+                    .ok()
+                    .unwrap();
+            let mut module_info = MODULEINFO::default();
+            GetModuleInformation(
+                process,
+                module,
+                &mut module_info,
+                std::mem::size_of_val(&module_info) as u32,
+            )
+            .ok()
+            .unwrap();
+            Self {
+                process,
+                name: module_name,
+                base: module_info.lpBaseOfDll,
+                size: module_info.SizeOfImage as usize,
+            }
+        }
+    }
+
+    /// name of the module
     pub fn name(&self) -> &str {
         self.name.as_str()
     }
+
+    /// base address of the module
     pub fn base(&self) -> usize {
         self.base as usize
     }
 
+    /// size of the module
     pub fn size(&self) -> usize {
         self.size
     }
 
-    pub fn symbols(&self) -> Vec<(String, usize)> {
+    /// all known addresses of the module
+    pub fn symbols(&self) -> anyhow::Result<Vec<(String, usize)>> {
         let mut data = vec![0; self.size];
         unsafe {
             ReadProcessMemory(
@@ -151,7 +162,7 @@ impl Module {
                 None,
             );
         }
-        let image = PeFile64::parse(data.as_slice()).unwrap();
+        let image = PeFile64::parse(data.as_slice())?;
 
         let mut symbols = vec![("entry_point".to_owned(), image.entry() as usize)];
         if let Some(directory) = image.data_directory(IMAGE_DIRECTORY_ENTRY_TLS) {
@@ -164,7 +175,7 @@ impl Module {
                     ) {
                         let mut i = 0;
                         loop {
-                            let callback = callback_data.read_u64::<LE>().unwrap();
+                            let callback = callback_data.read_u64::<LE>()?;
                             if callback == 0 {
                                 break;
                             }
@@ -175,10 +186,11 @@ impl Module {
                 }
             }
         }
-        symbols
+        Ok(symbols)
     }
 
-    pub fn symbol(&self, name: &str) -> Option<usize> {
+    /// searches for an address with the specified name
+    pub fn symbol(&self, name: &str) -> anyhow::Result<Option<usize>> {
         let mut data = vec![0; self.size];
         unsafe {
             ReadProcessMemory(
@@ -189,43 +201,43 @@ impl Module {
                 None,
             );
         }
-        let image = PeFile64::parse(data.as_slice()).unwrap();
+        let image = PeFile64::parse(data.as_slice())?;
 
         match name {
-            "entry_point" => Some(image.entry() as usize),
+            "entry_point" => Ok(Some(image.entry() as usize)),
             name => {
                 if let Some(name) = name.strip_prefix("tls_callback_") {
-                    let callback_ordinal = name.parse::<usize>().unwrap();
+                    let callback_ordinal = name.parse::<usize>()?;
                     let Some(directory) = image.data_directory(IMAGE_DIRECTORY_ENTRY_TLS) else {
-                        return None;
+                        return Ok(None);
                     };
                     let Ok(directory_data) = directory.data(image.data(), &image.section_table()) else {
-                        return None;
+                        return Ok(None);
                     };
                     let Ok(tls_directory) = directory_data.read_at::<ImageTlsDirectory64>(0) else {
-                        return None;
+                        return Ok(None);
                     };
                     let Some(mut callback_data) = image.section_table().pe_data_at(
                         image.data(),
                         (tls_directory.address_of_call_backs.get(LittleEndian)
                             - image.relative_address_base()) as u32,
                     ) else {
-                        return None;
+                        return Ok(None);
                     };
                     for _ in 0..callback_ordinal {
-                        let callback = callback_data.read_u64::<LE>().unwrap();
+                        let callback = callback_data.read_u64::<LE>()?;
                         if callback == 0 {
-                            return None;
+                            return Ok(None);
                         }
                     }
-                    let callback = callback_data.read_u64::<LE>().unwrap();
+                    let callback = callback_data.read_u64::<LE>()?;
                     if callback == 0 {
-                        None
+                        Ok(None)
                     } else {
-                        Some(callback as usize)
+                        Ok(Some(callback as usize))
                     }
                 } else {
-                    None
+                    Ok(None)
                 }
             }
         }

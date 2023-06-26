@@ -14,7 +14,7 @@ impl Address {
         };
         Some(
             if let Some(symbol) = self.symbol {
-                let Some(symbol) = module.symbol(symbol.as_str()) else {
+                let Ok(Some(symbol)) = module.symbol(symbol.as_str()) else {
                     return None;
                 };
                 symbol

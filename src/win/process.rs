@@ -1,37 +1,36 @@
-use std::{ffi::OsString, os::windows::ffi::OsStringExt, path::Path};
+use std::path::Path;
 
 use windows::{
     core::{HSTRING, PCWSTR, PWSTR},
     s,
     Win32::{
-        Foundation::{CloseHandle, HANDLE, HMODULE, MAX_PATH, UNICODE_STRING},
+        Foundation::{CloseHandle, FALSE, HANDLE, UNICODE_STRING},
         System::{
-            Diagnostics::Debug::{ReadProcessMemory, WriteProcessMemory},
+            Diagnostics::Debug::WriteProcessMemory,
             Kernel::STRING,
             LibraryLoader::{GetModuleHandleA, GetProcAddress},
             Memory::{VirtualAllocEx, MEM_COMMIT, MEM_RESERVE, PAGE_READWRITE},
-            ProcessStatus::{EnumProcessModules, GetModuleBaseNameW, GetModuleInformation},
             Threading::{
-                CreateProcessW, CreateRemoteThread, NtQueryInformationProcess,
-                ProcessBasicInformation, TerminateProcess, WaitForSingleObject, CREATE_SUSPENDED,
-                INFINITE, PEB_LDR_DATA, PPS_POST_PROCESS_INIT_ROUTINE, PROCESS_BASIC_INFORMATION,
-                PROCESS_INFORMATION, STARTUPINFOW, THREAD_CREATE_RUN_IMMEDIATELY,
+                CreateProcessW, CreateRemoteThread, ResumeThread, TerminateProcess,
+                WaitForSingleObject, CREATE_SUSPENDED, INFINITE, PEB_LDR_DATA,
+                PPS_POST_PROCESS_INIT_ROUTINE, PROCESS_INFORMATION, STARTUPINFOW,
+                THREAD_CREATE_RUN_IMMEDIATELY,
             },
         },
     },
 };
-use windows::Win32::Foundation::{FALSE, TRUE};
-use windows::Win32::System::Threading::{PROCESS_CREATION_FLAGS, ResumeThread};
 
 use crate::win::module::Module;
 
 pub struct Process {
-    pub(crate) process: HANDLE,
+    process: HANDLE,
     thread: HANDLE,
+
     name: String,
 }
 
 impl Process {
+    /// spawns a new process
     pub fn new(path: impl AsRef<Path>) -> Self {
         unsafe {
             let startup_info = STARTUPINFOW::default();
@@ -64,10 +63,13 @@ impl Process {
         }
     }
 
+    /// all known modules
     pub fn modules(&self) -> Vec<Module> {
         Module::all(self.process)
     }
 
+    /// searches for a module with the specified name, if the name is None the
+    /// image module will be returned
     pub fn module(&self, name: Option<String>) -> Option<Module> {
         Some(Module::by_name(
             self.process,
@@ -75,6 +77,7 @@ impl Process {
         ))
     }
 
+    /// loads a library into the process
     pub fn load_library(&self, path: impl AsRef<Path>) -> windows::core::Result<()> {
         let path = HSTRING::from(path.as_ref());
         let path = path.as_wide();
