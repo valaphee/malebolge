@@ -1,5 +1,9 @@
+[workspace]
+members = ["hook", "hook_shared"]
+resolver = "2"
+
 [package]
-name = "malebolge"
+name = "mbg"
 version = "0.0.0"
 edition = "2021"
 authors = ["Valaphee <iam@valaphee.com>"]
@@ -13,6 +17,8 @@ byteorder = "1.4.3"
 clap = { version = "4.2.7", features = ["derive"] }
 colored = "2.0.0"
 thiserror = "1.0.40"
+
+mbg_hook_shared = { path = "hook_shared" }
 
 iced-x86 = "1.18.0"
 object = { git = "https://github.com/valaphee/object.git", branch = "va-space", features = ["pe"] }

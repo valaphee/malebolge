@@ -1,28 +1,34 @@
-use std::path::Path;
+use std::{ffi::OsString, os::windows::ffi::OsStringExt, path::Path};
 
 use windows::{
     core::{HSTRING, PCWSTR, PWSTR},
+    s,
     Win32::{
-        Foundation::{HANDLE, UNICODE_STRING},
+        Foundation::{CloseHandle, HANDLE, HMODULE, MAX_PATH, UNICODE_STRING},
         System::{
-            Diagnostics::Debug::ReadProcessMemory,
+            Diagnostics::Debug::{ReadProcessMemory, WriteProcessMemory},
             Kernel::STRING,
+            LibraryLoader::{GetModuleHandleA, GetProcAddress},
+            Memory::{VirtualAllocEx, MEM_COMMIT, MEM_RESERVE, PAGE_READWRITE},
+            ProcessStatus::{EnumProcessModules, GetModuleBaseNameW, GetModuleInformation},
             Threading::{
-                CreateProcessW, NtQueryInformationProcess, ProcessBasicInformation,
-                TerminateProcess, CREATE_SUSPENDED, PEB_LDR_DATA, PPS_POST_PROCESS_INIT_ROUTINE,
-                PROCESS_BASIC_INFORMATION, PROCESS_INFORMATION, STARTUPINFOW,
+                CreateProcessW, CreateRemoteThread, NtQueryInformationProcess,
+                ProcessBasicInformation, TerminateProcess, WaitForSingleObject, CREATE_SUSPENDED,
+                INFINITE, PEB_LDR_DATA, PPS_POST_PROCESS_INIT_ROUTINE, PROCESS_BASIC_INFORMATION,
+                PROCESS_INFORMATION, STARTUPINFOW, THREAD_CREATE_RUN_IMMEDIATELY,
             },
         },
     },
 };
-use windows::Win32::Foundation::CloseHandle;
+use windows::Win32::Foundation::{FALSE, TRUE};
+use windows::Win32::System::Threading::{PROCESS_CREATION_FLAGS, ResumeThread};
 
 use crate::win::module::Module;
 
 pub struct Process {
-    handle: HANDLE,
-
-    base_module_name: String,
+    pub(crate) process: HANDLE,
+    thread: HANDLE,
+    name: String,
 }
 
 impl Process {
@@ -35,7 +41,7 @@ impl Process {
                 PWSTR::null(),
                 None,
                 None,
-                false,
+                FALSE,
                 CREATE_SUSPENDED,
                 None,
                 PCWSTR::null(),
@@ -44,66 +50,68 @@ impl Process {
             )
             .ok()
             .unwrap();
-
-
             Self {
-                handle: process_info.hProcess,
-                base_module_name: path.as_ref().file_name().unwrap().to_str().unwrap().to_string()
+                process: process_info.hProcess,
+                thread: process_info.hThread,
+                name: path
+                    .as_ref()
+                    .file_name()
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+                    .to_string(),
             }
         }
     }
 
-    pub fn modules(&self) -> Vec<(String, Module)> {
-        vec![(self.base_module_name.clone(), unsafe {
-            let mut pbi = PROCESS_BASIC_INFORMATION::default();
-            NtQueryInformationProcess(
-                self.handle,
-                ProcessBasicInformation,
-                std::ptr::addr_of_mut!(pbi) as *mut _,
-                std::mem::size_of_val(&pbi) as u32,
-                &mut 0,
-            )
-                .unwrap();
-            let mut peb = std::mem::zeroed::<PEB>();
-            ReadProcessMemory(
-                self.handle,
-                pbi.PebBaseAddress as *mut _,
-                std::ptr::addr_of_mut!(peb) as *mut _,
-                std::mem::size_of_val(&peb),
-                None,
-            )
-                .ok()
-                .unwrap();
-            Module::new(self.handle, peb.ImageBaseAddress)
-        })]
+    pub fn modules(&self) -> Vec<Module> {
+        Module::all(self.process)
     }
 
     pub fn module(&self, name: Option<String>) -> Option<Module> {
-        if let Some(_name) = name {
-            None
-        } else {
-            unsafe {
-                let mut pbi = PROCESS_BASIC_INFORMATION::default();
-                NtQueryInformationProcess(
-                    self.handle,
-                    ProcessBasicInformation,
-                    std::ptr::addr_of_mut!(pbi) as *mut _,
-                    std::mem::size_of_val(&pbi) as u32,
-                    &mut 0,
-                )
-                .unwrap();
-                let mut peb = std::mem::zeroed::<PEB>();
-                ReadProcessMemory(
-                    self.handle,
-                    pbi.PebBaseAddress as *mut _,
-                    std::ptr::addr_of_mut!(peb) as *mut _,
-                    std::mem::size_of_val(&peb),
-                    None,
-                )
-                .ok()
-                .unwrap();
-                Some(Module::new(self.handle, peb.ImageBaseAddress))
-            }
+        Some(Module::by_name(
+            self.process,
+            name.unwrap_or(self.name.clone()),
+        ))
+    }
+
+    pub fn load_library(&self, path: impl AsRef<Path>) -> windows::core::Result<()> {
+        let path = HSTRING::from(path.as_ref());
+        let path = path.as_wide();
+        unsafe {
+            let path_address = VirtualAllocEx(
+                self.process,
+                None,
+                std::mem::size_of_val(path),
+                MEM_COMMIT | MEM_RESERVE,
+                PAGE_READWRITE,
+            );
+            WriteProcessMemory(
+                self.process,
+                path_address as *const std::ffi::c_void,
+                path.as_ptr() as *const _,
+                std::mem::size_of_val(path),
+                None,
+            )
+            .ok()?;
+            let load_library_w =
+                GetProcAddress(GetModuleHandleA(s!("kernel32.dll"))?, s!("LoadLibraryW"));
+            let load_library_thread = CreateRemoteThread(
+                self.process,
+                None,
+                0,
+                Some(std::mem::transmute(load_library_w)),
+                Some(path_address),
+                THREAD_CREATE_RUN_IMMEDIATELY.0,
+                None,
+            )?;
+            WaitForSingleObject(load_library_thread, INFINITE).ok()
+        }
+    }
+
+    pub fn resume(&self) {
+        unsafe {
+            ResumeThread(self.thread);
         }
     }
 }
@@ -111,8 +119,8 @@ impl Process {
 impl Drop for Process {
     fn drop(&mut self) {
         unsafe {
-            TerminateProcess(self.handle, 0).ok().unwrap();
-            CloseHandle(self.handle);
+            TerminateProcess(self.process, 0).ok().unwrap();
+            CloseHandle(self.process);
         }
     }
 }
@@ -120,122 +128,122 @@ impl Drop for Process {
 #[repr(C)]
 #[derive(Debug)]
 #[allow(non_snake_case)]
-struct PEB {
-    InheritedAddressSpace: u8,
-    ReadImageFileExecOptions: u8,
-    BeingDebugged: u8,
-    BitField: u8,
-    Mutant: *mut std::ffi::c_void,
-    ImageBaseAddress: *mut std::ffi::c_void,
-    Ldr: *mut PEB_LDR_DATA,
-    ProcessParameters: *mut RTL_USER_PROCESS_PARAMETERS,
-    SubSystemData: *mut std::ffi::c_void,
-    ProcessHeap: *mut std::ffi::c_void,
-    FastPebLock: *mut std::ffi::c_void,
-    AtlThunkSListPtr: *mut std::ffi::c_void,
-    IFEOKey: *mut std::ffi::c_void,
-    CrossProcessFlags: u32,
-    KernelCallbackTable: *mut std::ffi::c_void,
-    SystemReserved: u32,
-    AtlThunkSListPtr32: u32,
-    ApiSetMap: *mut std::ffi::c_void,
-    TlsExpansionCounter: u32,
-    TlsBitmap: *mut std::ffi::c_void,
-    TlsBitmapBits: [u32; 2],
-    ReadOnlySharedMemoryBase: *mut std::ffi::c_void,
-    SharedData: *mut std::ffi::c_void,
-    ReadOnlyStaticServerData: *mut std::ffi::c_void,
-    AnsiCodePageData: *mut std::ffi::c_void,
-    OemCodePageData: *mut std::ffi::c_void,
-    UnicodeCaseTableData: *mut std::ffi::c_void,
-    NumberOfProcessors: u32,
-    NtGlobalFlag: u32,
-    CriticalSectionTimeout: u64,
-    HeapSegmentReserve: usize,
-    HeapSegmentCommit: usize,
-    HeapDeCommitTotalFreeThreshold: usize,
-    HeapDeCommitFreeBlockThreshold: usize,
-    NumberOfHeaps: u32,
-    MaximumNumberOfHeaps: u32,
-    ProcessHeaps: usize,
-    GdiSharedHandleTable: *mut std::ffi::c_void,
-    ProcessStarterHelper: *mut std::ffi::c_void,
-    GdiDCAttributeList: u32,
-    LoaderLock: *mut std::ffi::c_void,
-    OSSMajorVersion: u32,
-    OSMinorVersion: u32,
-    OSBuildNumber: u16,
-    OSCSDVersion: u16,
-    OSPlatformId: u32,
-    ImageSubsystem: u32,
-    ImageSubsystemMajorVersion: u32,
-    ImageSubsystemMinorVersion: u32,
-    ActiveProcessAffinityMask: u64,
-    GdiHandleBuffer: [u32; 0x3C],
-    PostProcessInitRoutine: PPS_POST_PROCESS_INIT_ROUTINE,
-    TlsExpansionBitmap: *mut std::ffi::c_void,
-    TlsExpansionBitmapBits: [u32; 0x20],
-    SessionId: u32,
+pub struct PEB {
+    pub InheritedAddressSpace: u8,
+    pub ReadImageFileExecOptions: u8,
+    pub BeingDebugged: u8,
+    pub BitField: u8,
+    pub Mutant: *mut std::ffi::c_void,
+    pub ImageBaseAddress: *mut std::ffi::c_void,
+    pub Ldr: *mut PEB_LDR_DATA,
+    pub ProcessParameters: *mut RTL_USER_PROCESS_PARAMETERS,
+    pub SubSystemData: *mut std::ffi::c_void,
+    pub ProcessHeap: *mut std::ffi::c_void,
+    pub FastPebLock: *mut std::ffi::c_void,
+    pub AtlThunkSListPtr: *mut std::ffi::c_void,
+    pub IFEOKey: *mut std::ffi::c_void,
+    pub CrossProcessFlags: u32,
+    pub KernelCallbackTable: *mut std::ffi::c_void,
+    pub SystemReserved: u32,
+    pub AtlThunkSListPtr32: u32,
+    pub ApiSetMap: *mut std::ffi::c_void,
+    pub TlsExpansionCounter: u32,
+    pub TlsBitmap: *mut std::ffi::c_void,
+    pub TlsBitmapBits: [u32; 2],
+    pub ReadOnlySharedMemoryBase: *mut std::ffi::c_void,
+    pub SharedData: *mut std::ffi::c_void,
+    pub ReadOnlyStaticServerData: *mut std::ffi::c_void,
+    pub AnsiCodePageData: *mut std::ffi::c_void,
+    pub OemCodePageData: *mut std::ffi::c_void,
+    pub UnicodeCaseTableData: *mut std::ffi::c_void,
+    pub NumberOfProcessors: u32,
+    pub NtGlobalFlag: u32,
+    pub CriticalSectionTimeout: u64,
+    pub HeapSegmentReserve: usize,
+    pub HeapSegmentCommit: usize,
+    pub HeapDeCommitTotalFreeThreshold: usize,
+    pub HeapDeCommitFreeBlockThreshold: usize,
+    pub NumberOfHeaps: u32,
+    pub MaximumNumberOfHeaps: u32,
+    pub ProcessHeaps: usize,
+    pub GdiSharedHandleTable: *mut std::ffi::c_void,
+    pub ProcessStarterHelper: *mut std::ffi::c_void,
+    pub GdiDCAttributeList: u32,
+    pub LoaderLock: *mut std::ffi::c_void,
+    pub OSSMajorVersion: u32,
+    pub OSMinorVersion: u32,
+    pub OSBuildNumber: u16,
+    pub OSCSDVersion: u16,
+    pub OSPlatformId: u32,
+    pub ImageSubsystem: u32,
+    pub ImageSubsystemMajorVersion: u32,
+    pub ImageSubsystemMinorVersion: u32,
+    pub ActiveProcessAffinityMask: u64,
+    pub GdiHandleBuffer: [u32; 0x3C],
+    pub PostProcessInitRoutine: PPS_POST_PROCESS_INIT_ROUTINE,
+    pub TlsExpansionBitmap: *mut std::ffi::c_void,
+    pub TlsExpansionBitmapBits: [u32; 0x20],
+    pub SessionId: u32,
 }
 
 #[repr(C)]
 #[derive(Debug)]
 #[allow(non_snake_case)]
-struct RTL_USER_PROCESS_PARAMETERS {
-    MaximumLength: u32,
-    Length: u32,
-    Flags: u32,
-    DebugFlags: u32,
-    ConsoleHandle: *mut std::ffi::c_void,
-    ConsoleFlags: u32,
-    StandardInput: *mut std::ffi::c_void,
-    StandardOutput: *mut std::ffi::c_void,
-    StandardError: *mut std::ffi::c_void,
-    CurrentDirectory: CURDIR,
-    DllPath: UNICODE_STRING,
-    ImagePathName: UNICODE_STRING,
-    CommandLine: UNICODE_STRING,
-    Environment: *mut std::ffi::c_void,
-    StartingX: u32,
-    StartingY: u32,
-    CountX: u32,
-    CountY: u32,
-    CountCharsX: u32,
-    CountCharsY: u32,
-    FillAttribute: u32,
-    WindowFlags: u32,
-    ShowWindowFlags: u32,
-    WindowTitle: UNICODE_STRING,
-    DesktopInfo: UNICODE_STRING,
-    ShellInfo: UNICODE_STRING,
-    RuntimeData: UNICODE_STRING,
-    CurrentDirectories: [RTL_DRIVE_LETTER_CURDIR; 0x20],
-    EnvironmentSize: usize,
-    EnvironmentVersion: usize,
-    PackageDependencyData: *mut std::ffi::c_void,
-    ProcessGroupId: u32,
-    LoaderThreads: u32,
-    RedirectionDllName: UNICODE_STRING,
-    HeapPartitionName: UNICODE_STRING,
-    DefaultThreadpoolCpuSetMasks: *mut core::ffi::c_void,
-    DefaultThreadpoolCpuSetMaskCount: u32,
-    DefaultThreadpoolThreadMaximum: u32,
+pub struct RTL_USER_PROCESS_PARAMETERS {
+    pub MaximumLength: u32,
+    pub Length: u32,
+    pub Flags: u32,
+    pub DebugFlags: u32,
+    pub ConsoleHandle: *mut std::ffi::c_void,
+    pub ConsoleFlags: u32,
+    pub StandardInput: *mut std::ffi::c_void,
+    pub StandardOutput: *mut std::ffi::c_void,
+    pub StandardError: *mut std::ffi::c_void,
+    pub CurrentDirectory: CURDIR,
+    pub DllPath: UNICODE_STRING,
+    pub ImagePathName: UNICODE_STRING,
+    pub CommandLine: UNICODE_STRING,
+    pub Environment: *mut std::ffi::c_void,
+    pub StartingX: u32,
+    pub StartingY: u32,
+    pub CountX: u32,
+    pub CountY: u32,
+    pub CountCharsX: u32,
+    pub CountCharsY: u32,
+    pub FillAttribute: u32,
+    pub WindowFlags: u32,
+    pub ShowWindowFlags: u32,
+    pub WindowTitle: UNICODE_STRING,
+    pub DesktopInfo: UNICODE_STRING,
+    pub ShellInfo: UNICODE_STRING,
+    pub RuntimeData: UNICODE_STRING,
+    pub CurrentDirectories: [RTL_DRIVE_LETTER_CURDIR; 0x20],
+    pub EnvironmentSize: usize,
+    pub EnvironmentVersion: usize,
+    pub PackageDependencyData: *mut std::ffi::c_void,
+    pub ProcessGroupId: u32,
+    pub LoaderThreads: u32,
+    pub RedirectionDllName: UNICODE_STRING,
+    pub HeapPartitionName: UNICODE_STRING,
+    pub DefaultThreadpoolCpuSetMasks: *mut core::ffi::c_void,
+    pub DefaultThreadpoolCpuSetMaskCount: u32,
+    pub DefaultThreadpoolThreadMaximum: u32,
 }
 
 #[repr(C)]
 #[derive(Debug)]
 #[allow(non_snake_case)]
-struct CURDIR {
-    DosPath: UNICODE_STRING,
-    Handle: *mut std::ffi::c_void,
+pub struct CURDIR {
+    pub DosPath: UNICODE_STRING,
+    pub Handle: *mut std::ffi::c_void,
 }
 
 #[repr(C)]
 #[derive(Debug)]
 #[allow(non_snake_case)]
-struct RTL_DRIVE_LETTER_CURDIR {
-    Flags: u16,
-    Length: u16,
-    TimeStamp: u32,
-    DosPath: STRING,
+pub struct RTL_DRIVE_LETTER_CURDIR {
+    pub Flags: u16,
+    pub Length: u16,
+    pub TimeStamp: u32,
+    pub DosPath: STRING,
 }

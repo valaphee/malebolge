@@ -1,4 +1,4 @@
-use std::ops::Range;
+use std::{ffi::OsString, ops::Range, os::windows::ffi::OsStringExt};
 
 use byteorder::{ReadBytesExt, LE};
 use object::{
@@ -6,30 +6,139 @@ use object::{
     read::pe::{ImageNtHeaders, ImageOptionalHeader, PeFile64},
     LittleEndian, Object, ReadRef,
 };
-use windows::Win32::{Foundation::HANDLE, System::Diagnostics::Debug::ReadProcessMemory};
+use windows::{
+    core::HSTRING,
+    Win32::{
+        Foundation::{HANDLE, HMODULE, MAX_PATH},
+        System::{
+            Diagnostics::Debug::ReadProcessMemory,
+            LibraryLoader::GetModuleHandleW,
+            ProcessStatus::{
+                EnumProcessModules, GetModuleBaseNameW, GetModuleInformation, MODULEINFO,
+            },
+            Threading::{
+                NtQueryInformationProcess, ProcessBasicInformation, PROCESS_BASIC_INFORMATION,
+            },
+        },
+    },
+};
+
+use crate::win::process::PEB;
 
 pub struct Module {
     process: HANDLE,
-
+    name: String,
     base: *mut std::ffi::c_void,
     size: usize,
 }
 
 impl Module {
-    pub fn new(process: HANDLE, base: *mut std::ffi::c_void) -> Self {
-        let image = PeFile64::parse(ProcessMemoryReadRef { process, base }).unwrap();
-        Self {
-            process,
-            base,
-            size: image.nt_headers().optional_header().size_of_image() as usize,
+    pub fn all(process: HANDLE) -> Vec<Self> {
+        let mut result = vec![];
+        unsafe {
+            let mut modules = [HMODULE::default(); 128];
+            let mut modules_length = 0;
+            if EnumProcessModules(
+                process,
+                modules.as_mut_ptr(),
+                std::mem::size_of_val(&modules) as u32,
+                &mut modules_length,
+            )
+            .ok()
+            .is_ok()
+            {
+                for &module in &modules[..modules_length as usize / std::mem::size_of::<HMODULE>()]
+                {
+                    result.push(Self::new(process, module))
+                }
+            } else {
+                result.push(Self::new_image(process))
+            }
+        }
+        result
+    }
+
+    pub fn by_name(process: HANDLE, name: String) -> Self {
+        unsafe {
+            let module = GetModuleHandleW(&HSTRING::from(name)).unwrap();
+            Self::new(process, module)
         }
     }
 
+    pub fn new(process: HANDLE, module: HMODULE) -> Self {
+        unsafe {
+            let mut module_name = [0; MAX_PATH as usize];
+            GetModuleBaseNameW(process, module, &mut module_name);
+            let module_name =
+                OsString::from_wide(module_name.split(|&elem| elem == 0).next().unwrap())
+                    .into_string()
+                    .ok()
+                    .unwrap();
+            let mut module_info = MODULEINFO::default();
+            GetModuleInformation(
+                process,
+                module,
+                &mut module_info,
+                std::mem::size_of_val(&module_info) as u32,
+            )
+            .ok()
+            .unwrap();
+            Self {
+                process,
+                name: module_name,
+                base: module_info.lpBaseOfDll,
+                size: module_info.SizeOfImage as usize,
+            }
+        }
+    }
+
+    pub fn new_image(process: HANDLE) -> Self {
+        unsafe {
+            let mut pbi = PROCESS_BASIC_INFORMATION::default();
+            NtQueryInformationProcess(
+                process,
+                ProcessBasicInformation,
+                std::ptr::addr_of_mut!(pbi) as *mut _,
+                std::mem::size_of_val(&pbi) as u32,
+                &mut 0,
+            )
+            .unwrap();
+            let mut peb = std::mem::zeroed::<PEB>();
+            ReadProcessMemory(
+                process,
+                pbi.PebBaseAddress as *mut _,
+                std::ptr::addr_of_mut!(peb) as *mut _,
+                std::mem::size_of_val(&peb),
+                None,
+            )
+            .ok()
+            .unwrap();
+            Self {
+                process,
+                name: "".to_string(),
+                base: peb.ImageBaseAddress,
+                size: PeFile64::parse(ProcessMemoryReadRef {
+                    process,
+                    base: peb.ImageBaseAddress,
+                })
+                .unwrap()
+                .nt_headers()
+                .optional_header()
+                .size_of_image() as usize,
+            }
+        }
+    }
+
+    pub fn name(&self) -> &str {
+        self.name.as_str()
+    }
     pub fn base(&self) -> usize {
         self.base as usize
     }
 
-    pub fn size(&self) -> usize { self.size as usize }
+    pub fn size(&self) -> usize {
+        self.size
+    }
 
     pub fn symbols(&self) -> Vec<(String, usize)> {
         let mut data = vec![0; self.size];

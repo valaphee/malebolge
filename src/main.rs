@@ -1,3 +1,5 @@
+#![feature(try_blocks)]
+
 use clap::Parser;
 
 use crate::cli::Args;
