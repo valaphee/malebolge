@@ -16,15 +16,17 @@ use windows::{
     },
 };
 
-pub struct BreakpointListView {
-    file: HANDLE,
-
-    data: &'static mut BreakpointList,
+pub struct BreakpointListOwner {
+    pub trigger_event: HANDLE,
+    pub resolve_event: HANDLE,
+    pub file: HANDLE,
+    pub data: &'static mut BreakpointList,
 }
 
-impl BreakpointListView {
-    pub fn new(dup_process: HANDLE) -> Self {
+impl BreakpointListOwner {
+    pub fn new(target_process: HANDLE) -> Self {
         unsafe {
+            // create new file mapping with the name BreakpointList and map it
             let file = CreateFileMappingA(
                 INVALID_HANDLE_VALUE,
                 None,
@@ -43,38 +45,53 @@ impl BreakpointListView {
             )
             .unwrap()
             .0 as *mut BreakpointList);
-            *data = BreakpointList::new(dup_process);
-            Self { file, data }
-        }
-    }
 
-    pub fn open() -> Self {
-        unsafe {
-            let file = OpenFileMappingA(
-                (FILE_MAP_READ | FILE_MAP_WRITE).0,
+            // create trigger and resolve events which are used for IPC
+            let process = GetCurrentProcess();
+            let trigger_event = CreateEventA(None, FALSE, FALSE, PCSTR::null()).unwrap();
+            let mut target_trigger_event = HANDLE::default();
+            DuplicateHandle(
+                process,
+                trigger_event,
+                target_process,
+                &mut target_trigger_event,
+                DUPLICATE_SAME_ACCESS.0,
                 FALSE,
-                s!("BreakpointList"),
+                DUPLICATE_HANDLE_OPTIONS::default(),
             )
+            .ok()
             .unwrap();
-            let data = &mut *(MapViewOfFile(
-                file,
-                FILE_MAP_READ | FILE_MAP_WRITE,
-                0,
-                0,
-                std::mem::size_of::<BreakpointList>(),
+            let resolve_event = CreateEventA(None, FALSE, FALSE, PCSTR::null()).unwrap();
+            let mut target_resolve_event = HANDLE::default();
+            DuplicateHandle(
+                process,
+                resolve_event,
+                target_process,
+                &mut target_resolve_event,
+                DUPLICATE_SAME_ACCESS.0,
+                FALSE,
+                DUPLICATE_HANDLE_OPTIONS::default(),
             )
-            .unwrap()
-            .0 as *mut BreakpointList);
-            Self { file, data }
-        }
-    }
+            .ok()
+            .unwrap();
 
-    pub fn data(&mut self) -> &mut BreakpointList {
-        self.data
+            // store the duplicated events into the shared memory
+            *data = BreakpointList {
+                trigger_event: target_trigger_event,
+                resolve_event: target_resolve_event,
+                entries: [BreakpointEntry::default(); 256],
+            };
+            Self {
+                trigger_event,
+                resolve_event,
+                file,
+                data,
+            }
+        }
     }
 }
 
-impl Drop for BreakpointListView {
+impl Drop for BreakpointListOwner {
     fn drop(&mut self) {
         unsafe {
             UnmapViewOfFile(MEMORYMAPPEDVIEW_HANDLE(self.data as *mut _ as isize));
@@ -84,60 +101,29 @@ impl Drop for BreakpointListView {
 }
 
 pub struct BreakpointList {
-    pub chld_event: HANDLE,
-    pub chld_event_dup: HANDLE,
-    pub prnt_event: HANDLE,
-    pub prnt_event_dup: HANDLE,
-
+    pub trigger_event: HANDLE,
+    pub resolve_event: HANDLE,
     pub entries: [BreakpointEntry; 256],
 }
 
 impl BreakpointList {
-    pub fn new(dup_process: HANDLE) -> Self {
+    pub fn new() -> &'static mut BreakpointList {
         unsafe {
-            let process = GetCurrentProcess();
-            let chld_event = CreateEventA(None, FALSE, FALSE, PCSTR::null()).unwrap();
-            let mut chld_event_dup = HANDLE::default();
-            DuplicateHandle(
-                process,
-                chld_event,
-                dup_process,
-                &mut chld_event_dup,
-                DUPLICATE_SAME_ACCESS.0,
+            let file = OpenFileMappingA(
+                (FILE_MAP_READ | FILE_MAP_WRITE).0,
                 FALSE,
-                DUPLICATE_HANDLE_OPTIONS::default(),
+                s!("BreakpointList"),
             )
-            .ok()
             .unwrap();
-            let prnt_event = CreateEventA(None, FALSE, FALSE, PCSTR::null()).unwrap();
-            let mut prnt_event_dup = HANDLE::default();
-            DuplicateHandle(
-                process,
-                prnt_event,
-                dup_process,
-                &mut prnt_event_dup,
-                DUPLICATE_SAME_ACCESS.0,
-                FALSE,
-                DUPLICATE_HANDLE_OPTIONS::default(),
+            &mut *(MapViewOfFile(
+                file,
+                FILE_MAP_READ | FILE_MAP_WRITE,
+                0,
+                0,
+                std::mem::size_of::<BreakpointList>(),
             )
-            .ok()
-            .unwrap();
-            Self {
-                chld_event,
-                chld_event_dup,
-                prnt_event,
-                prnt_event_dup,
-                entries: [BreakpointEntry::default(); 256],
-            }
-        }
-    }
-}
-
-impl Drop for BreakpointList {
-    fn drop(&mut self) {
-        unsafe {
-            CloseHandle(self.prnt_event);
-            CloseHandle(self.chld_event);
+            .unwrap()
+            .0 as *mut BreakpointList)
         }
     }
 }

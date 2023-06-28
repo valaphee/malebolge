@@ -20,7 +20,7 @@ use windows::{
     },
 };
 
-use crate::win::module::Module;
+use crate::{module::Module, Result};
 
 pub struct Process {
     process: HANDLE,
@@ -31,7 +31,7 @@ pub struct Process {
 
 impl Process {
     /// spawns a new process
-    pub fn new(path: impl AsRef<Path>) -> Self {
+    pub fn new(path: impl AsRef<Path>) -> Result<Self> {
         unsafe {
             let startup_info = STARTUPINFOW::default();
             let mut process_info = PROCESS_INFORMATION::default();
@@ -47,9 +47,8 @@ impl Process {
                 &startup_info,
                 &mut process_info,
             )
-            .ok()
-            .unwrap();
-            Self {
+            .ok()?;
+            Ok(Self {
                 process: process_info.hProcess,
                 thread: process_info.hThread,
                 name: path
@@ -59,42 +58,26 @@ impl Process {
                     .to_str()
                     .unwrap()
                     .to_string(),
-            }
+            })
         }
     }
 
     /// all known modules
-    pub fn modules(&self) -> Vec<Module> {
+    pub fn modules(&self) -> Result<Vec<Module>> {
         Module::all(self.process)
     }
 
     /// searches for a module with the specified name, if the name is None the
     /// image module will be returned
-    pub fn module(&self, name: Option<String>) -> Option<Module> {
-        let Some(name) = name else {
-            return Some(Module::from_peb(self.process));
-        };
-        Module::by_name(self.process, name)
-    }
-
-    pub fn read(&self, address: usize, length: usize) -> Vec<u8> {
-        let mut data = vec![0; length];
-        unsafe {
-            ReadProcessMemory(
-                self.process,
-                address as *mut _,
-                data.as_mut_ptr() as *mut _,
-                data.len(),
-                None,
-            )
-            .ok()
-            .unwrap();
+    pub fn module(&self, name: Option<String>) -> Result<Module> {
+        if let Some(name) = name {
+            return Module::by_name(self.process, name);
         }
-        data
+        return Module::from_peb(self.process);
     }
 
     /// loads a library into the process
-    pub fn load_library(&self, path: impl AsRef<Path>) -> windows::core::Result<()> {
+    pub fn load_library(&self, path: impl AsRef<Path>) -> Result<()> {
         let path = HSTRING::from(path.as_ref());
         let path = path.as_wide();
         unsafe {
@@ -124,7 +107,8 @@ impl Process {
                 THREAD_CREATE_RUN_IMMEDIATELY.0,
                 None,
             )?;
-            WaitForSingleObject(load_library_thread, INFINITE).ok()
+            WaitForSingleObject(load_library_thread, INFINITE).ok()?;
+            Ok(())
         }
     }
 

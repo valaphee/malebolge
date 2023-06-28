@@ -23,56 +23,45 @@ use windows::{
     },
 };
 
-use crate::win::process::PEB;
+use crate::{process::PEB, Result};
 
 pub struct Module {
     process: HANDLE,
 
     name: String,
-    base: *mut std::ffi::c_void,
+    base: usize,
     size: usize,
 }
 
 impl Module {
     /// all known modules
-    pub fn all(process: HANDLE) -> Vec<Self> {
+    pub fn all(process: HANDLE) -> Result<Vec<Self>> {
         let mut result = vec![];
         unsafe {
             let mut modules = [HMODULE::default(); 128];
             let mut modules_length = 0;
-            if EnumProcessModules(
+            EnumProcessModules(
                 process,
                 modules.as_mut_ptr(),
                 std::mem::size_of_val(&modules) as u32,
                 &mut modules_length,
             )
-            .ok()
-            .is_ok()
-            {
-                for &module in &modules[..modules_length as usize / std::mem::size_of::<HMODULE>()]
-                {
-                    result.push(Self::from_handle(process, module))
-                }
-            } else {
-                result.push(Self::from_peb(process))
+            .ok()?;
+            for &module in &modules[..modules_length as usize / std::mem::size_of::<HMODULE>()] {
+                result.push(Self::from_handle(process, module)?)
             }
         }
-        result
+        Ok(result)
     }
 
     /// searches for a module with the specified name, if the name is None the
     /// image module will be returned
-    pub fn by_name(process: HANDLE, name: String) -> Option<Self> {
-        unsafe {
-            let Ok(module) = GetModuleHandleW(&HSTRING::from(name)) else {
-                return None;
-            };
-            Some(Self::from_handle(process, module))
-        }
+    pub fn by_name(process: HANDLE, name: String) -> Result<Self> {
+        unsafe { Self::from_handle(process, GetModuleHandleW(&HSTRING::from(name))?) }
     }
 
     /// module from PEB
-    pub fn from_peb(process: HANDLE) -> Self {
+    pub fn from_peb(process: HANDLE) -> Result<Self> {
         unsafe {
             let mut pbi = PROCESS_BASIC_INFORMATION::default();
             NtQueryInformationProcess(
@@ -81,8 +70,7 @@ impl Module {
                 std::ptr::addr_of_mut!(pbi) as *mut _,
                 std::mem::size_of_val(&pbi) as u32,
                 &mut 0,
-            )
-            .unwrap();
+            )?;
             let mut peb = std::mem::zeroed::<PEB>();
             ReadProcessMemory(
                 process,
@@ -91,26 +79,24 @@ impl Module {
                 std::mem::size_of_val(&peb),
                 None,
             )
-            .ok()
-            .unwrap();
-            Self {
+            .ok()?;
+            Ok(Self {
                 process,
                 name: "".to_string(),
-                base: peb.ImageBaseAddress,
+                base: peb.ImageBaseAddress as usize,
                 size: PeFile64::parse(ProcessMemoryReadRef {
                     process,
                     base: peb.ImageBaseAddress,
-                })
-                .unwrap()
+                })?
                 .nt_headers()
                 .optional_header()
                 .size_of_image() as usize,
-            }
+            })
         }
     }
 
     /// module from handle
-    pub fn from_handle(process: HANDLE, module: HMODULE) -> Self {
+    pub fn from_handle(process: HANDLE, module: HMODULE) -> Result<Self> {
         unsafe {
             let mut module_name = [0; MAX_PATH as usize];
             GetModuleBaseNameW(process, module, &mut module_name);
@@ -126,14 +112,13 @@ impl Module {
                 &mut module_info,
                 std::mem::size_of_val(&module_info) as u32,
             )
-            .ok()
-            .unwrap();
-            Self {
+            .ok()?;
+            Ok(Self {
                 process,
                 name: module_name,
-                base: module_info.lpBaseOfDll,
+                base: module_info.lpBaseOfDll as usize,
                 size: module_info.SizeOfImage as usize,
-            }
+            })
         }
     }
 
@@ -153,16 +138,17 @@ impl Module {
     }
 
     /// all known addresses of the module
-    pub fn symbols(&self) -> anyhow::Result<Vec<(String, usize)>> {
+    pub fn symbols(&self) -> Result<Vec<(String, usize)>> {
         let mut data = vec![0; self.size];
         unsafe {
             ReadProcessMemory(
                 self.process,
-                self.base,
+                self.base as *const std::ffi::c_void,
                 data.as_mut_ptr() as *mut _,
                 data.len(),
                 None,
-            );
+            )
+            .ok()?;
         }
         let image = PeFile64::parse(data.as_slice())?;
 
@@ -192,16 +178,17 @@ impl Module {
     }
 
     /// searches for an address with the specified name
-    pub fn symbol(&self, name: &str) -> anyhow::Result<Option<usize>> {
+    pub fn symbol(&self, name: &str) -> Result<Option<usize>> {
         let mut data = vec![0; self.size];
         unsafe {
             ReadProcessMemory(
                 self.process,
-                self.base,
+                self.base as *const std::ffi::c_void,
                 data.as_mut_ptr() as *mut _,
                 data.len(),
                 None,
-            );
+            )
+            .ok()?;
         }
         let image = PeFile64::parse(data.as_slice())?;
 
@@ -209,7 +196,7 @@ impl Module {
             "entry_point" => Ok(Some(image.entry() as usize)),
             name => {
                 if let Some(name) = name.strip_prefix("tls_callback_") {
-                    let callback_ordinal = name.parse::<usize>()?;
+                    let callback_ordinal = name.parse::<usize>().unwrap();
                     let Some(directory) = image.data_directory(IMAGE_DIRECTORY_ENTRY_TLS) else {
                         return Ok(None);
                     };
@@ -253,11 +240,11 @@ struct ProcessMemoryReadRef {
 }
 
 impl<'a> ReadRef<'a> for ProcessMemoryReadRef {
-    fn len(self) -> Result<u64, ()> {
+    fn len(self) -> std::result::Result<u64, ()> {
         todo!()
     }
 
-    fn read_bytes_at(self, offset: u64, size: u64) -> Result<&'a [u8], ()> {
+    fn read_bytes_at(self, offset: u64, size: u64) -> std::result::Result<&'a [u8], ()> {
         let mut value = vec![0u8; size as usize];
         unsafe {
             ReadProcessMemory(
@@ -271,7 +258,11 @@ impl<'a> ReadRef<'a> for ProcessMemoryReadRef {
         Ok(value.leak())
     }
 
-    fn read_bytes_at_until(self, _range: Range<u64>, _delimiter: u8) -> Result<&'a [u8], ()> {
+    fn read_bytes_at_until(
+        self,
+        _range: Range<u64>,
+        _delimiter: u8,
+    ) -> std::result::Result<&'a [u8], ()> {
         todo!()
     }
 }

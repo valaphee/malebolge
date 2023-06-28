@@ -19,13 +19,13 @@ unsafe extern "system" fn DllMain(
     _reserved: *const std::ffi::c_void,
 ) -> bool {
     if reason == DLL_PROCESS_ATTACH {
+        // disable DLL_THREAD_ATTACH and DLL_THREAD_DETACH calls
         DisableThreadLibraryCalls(module).ok().unwrap();
 
-        // open the shared memory wrapper, and leak it
-        let mut breakpoint_list_view = BreakpointListView::open();
-        BREAKPOINT_LIST = breakpoint_list_view.data();
-        std::mem::forget(breakpoint_list_view);
+        // initialize the breakpoint list
+        BREAKPOINT_LIST = BreakpointList::new();
 
+        // add vectored exception handler for handling breakpoints
         AddVectoredExceptionHandler(1, Some(vectored_exception_handler));
     }
 
@@ -51,9 +51,9 @@ unsafe extern "system" fn vectored_exception_handler(
     breakpoint.trigger = true;
 
     // notify the host process and wait until the trigger has been reset
-    SetEvent(breakpoint_list.chld_event_dup).ok().unwrap();
+    SetEvent(breakpoint_list.trigger_event).ok().unwrap();
     loop {
-        WaitForSingleObject(breakpoint_list.prnt_event_dup, INFINITE)
+        WaitForSingleObject(breakpoint_list.resolve_event, INFINITE)
             .ok()
             .unwrap();
         if !breakpoint.trigger {

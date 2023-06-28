@@ -12,12 +12,7 @@ repository = "https://github.com/valaphee/malebolge.git"
 description = "Reverse-engineering sandbox"
 
 [dependencies]
-anyhow = "1.0.71"
 byteorder = "1.4.3"
-clap = { version = "4.2.7", features = ["derive"] }
-colored = "2.0.0"
-lazy_static = "1.4.0"
-regex = "1.8.1"
 thiserror = "1.0.40"
 
 mbg_hook_shared = { path = "hook_shared" }
